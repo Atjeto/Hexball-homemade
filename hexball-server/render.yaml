@@ -4,7 +4,8 @@ services:
     runtime: node
     plan: free
     buildCommand: npm install
-    startCommand: npm start
+    startCommand: node server.js
+    healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
-        value: 20
+        value: "20.18.0"

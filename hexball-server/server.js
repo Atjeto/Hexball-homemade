@@ -734,9 +734,20 @@ const MIME = {
 };
 
 const httpServer = http.createServer((req, res) => {
-  const url = new URL(req.url, 'http://x');
+  // Handle non-GET cleanly
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405); return res.end();
+  }
+  let url;
+  try { url = new URL(req.url, 'http://x'); } catch (e) { res.writeHead(400); return res.end(); }
+
+  // Health check (Render uses this; also useful for debugging)
+  if (url.pathname === '/health' || url.pathname === '/healthz') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    return res.end('ok');
+  }
+
   let p = url.pathname === '/' ? '/index.html' : url.pathname;
-  // basic safety
   if (p.includes('..')) { res.writeHead(400); return res.end(); }
   const filePath = path.join(PUBLIC, p);
   fs.readFile(filePath, (err, data) => {
@@ -751,6 +762,11 @@ const httpServer = http.createServer((req, res) => {
       res.end(data);
     }
   });
+});
+
+httpServer.on('error', (err) => {
+  console.error('HTTP server error:', err);
+  process.exit(1);
 });
 
 // ============== WEBSOCKET SERVER ==============
@@ -871,6 +887,22 @@ wss.on('connection', (ws) => {
   ws.on('error', () => {});
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`Hexball server listening on :${PORT}`);
+// Global crash handlers so failures show up in logs instead of silent exits
+process.on('uncaughtException', (err) => {
+  console.error('FATAL: uncaughtException', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('FATAL: unhandledRejection', err);
+  process.exit(1);
+});
+
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`Hexball server listening on 0.0.0.0:${PORT}`);
+  console.log(`Node ${process.version}, public dir: ${PUBLIC}`);
+  // Sanity: can we read index.html at boot?
+  fs.access(path.join(PUBLIC, 'index.html'), fs.constants.R_OK, (err) => {
+    if (err) console.error('WARN: cannot read public/index.html ->', err.message);
+    else console.log('public/index.html is readable');
+  });
 });

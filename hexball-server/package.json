@@ -1,6 +1,6 @@
 {
   "name": "hexball-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Hexball multiplayer server",
   "main": "server.js",
   "scripts": {
@@ -10,6 +10,6 @@
     "ws": "^8.18.0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=18.0.0"
   }
 }
