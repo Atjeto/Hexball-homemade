@@ -1,0 +1,1330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#f3f1ec" id="themeColor" />
+<title>HEXBALL</title>
+<style>
+  :root[data-theme="light"] {
+    --bg: #f3f1ec;
+    --bg-2: #faf8f3;
+    --line: #d8d3c4;
+    --ink: #1c2024;
+    --muted: #7a7368;
+    --accent: #d97e2c;
+    --red: #c83838;
+    --blue: #2d5fb8;
+    --grass: #7fb961;
+    --grass-stripe: rgba(0,0,0,0.05);
+    --field-line: rgba(255,255,255,0.85);
+    --canvas-bg: #7fb961;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1116;
+    --bg-2: #161b23;
+    --line: #232a35;
+    --ink: #e6edf3;
+    --muted: #8b96a7;
+    --accent: #f5d76e;
+    --red: #e54b4b;
+    --blue: #4b8bf5;
+    --grass: #1d6f3f;
+    --grass-stripe: rgba(0,0,0,0.06);
+    --field-line: rgba(255,255,255,0.55);
+    --canvas-bg: #1d6f3f;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: var(--bg); color: var(--ink);
+    font-family: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    overflow: hidden; user-select: none; -webkit-user-select: none;
+    overscroll-behavior: none; touch-action: none;
+    transition: background 0.2s, color 0.2s;
+  }
+  #app { width: 100vw; height: 100vh; height: 100dvh; position: relative; display: flex; flex-direction: column; }
+
+  /* Generic screens */
+  .screen {
+    width: 100%; height: 100%;
+    padding: max(env(safe-area-inset-top),20px) 20px max(env(safe-area-inset-bottom),20px);
+    display: none; flex-direction: column;
+    overflow-y: auto;
+  }
+  .screen.active { display: flex; }
+
+  .top-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px;
+  }
+  .brand {
+    font-family: 'Space Mono', monospace;
+    font-size: 36px; font-weight: 700;
+    letter-spacing: 0.16em;
+    margin: 0; line-height: 1;
+  }
+  .brand .dot { color: var(--accent); }
+  .icon-btn {
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .icon-btn:active { transform: scale(0.92); }
+  .tag { font-size: 10px; color: var(--muted); letter-spacing: 0.3em; text-transform: uppercase; margin-bottom: 18px; }
+
+  .conn-status {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.2em;
+    margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .conn-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .conn-status.connected .dot { background: #4caf50; }
+  .conn-status.error .dot { background: var(--red); }
+
+  .label { font-size: 10px; letter-spacing: 0.25em; color: var(--muted); text-transform: uppercase; margin: 14px 0 8px; }
+  .options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .options.three { grid-template-columns: repeat(3, 1fr); }
+  .opt {
+    background: transparent; border: 1px solid var(--line);
+    color: var(--ink); padding: 14px 8px;
+    font-family: inherit; font-size: 12px;
+    cursor: pointer; text-align: center;
+    letter-spacing: 0.05em;
+    transition: all 0.12s ease;
+  }
+  .opt:active { transform: scale(0.97); }
+  .opt.active { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
+
+  .text-input, .name-input {
+    width: 100%;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    padding: 14px;
+    font-family: inherit;
+    font-size: 14px;
+    letter-spacing: 0.1em;
+    text-align: center;
+  }
+  .text-input:focus, .name-input:focus { outline: none; border-color: var(--accent); }
+  .code-input {
+    text-transform: uppercase;
+    letter-spacing: 0.4em;
+    font-family: 'Space Mono', monospace;
+    font-size: 24px;
+    font-weight: 700;
+  }
+
+  .btn-primary {
+    width: 100%;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    padding: 18px;
+    font-family: 'Space Mono', monospace;
+    font-size: 14px; font-weight: 700;
+    letter-spacing: 0.25em;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+  .btn-primary:active { transform: scale(0.98); }
+  .btn-primary:disabled { background: var(--muted); cursor: not-allowed; }
+
+  .btn-secondary {
+    width: 100%;
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line);
+    padding: 14px;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+
+  .mode-card {
+    border: 1px solid var(--line);
+    padding: 14px; margin-bottom: 8px;
+    cursor: pointer;
+    background: var(--bg-2);
+  }
+  .mode-card .title {
+    font-family: 'Space Mono', monospace;
+    font-size: 13px; letter-spacing: 0.18em; margin-bottom: 4px;
+  }
+  .mode-card .desc { font-size: 10px; color: var(--muted); line-height: 1.5; }
+  .mode-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .mode-card.active .title { color: var(--accent); }
+
+  /* Lobby */
+  .lobby-code {
+    font-family: 'Space Mono', monospace;
+    font-size: 48px; font-weight: 700;
+    letter-spacing: 0.3em;
+    text-align: center;
+    color: var(--accent);
+    margin: 16px 0 4px;
+    padding: 16px;
+    border: 2px dashed var(--line);
+  }
+  .lobby-hint { font-size: 10px; text-align: center; color: var(--muted); letter-spacing: 0.2em; margin-bottom: 16px; }
+  .player-list {
+    border-top: 1px solid var(--line);
+    margin-top: 12px;
+  }
+  .player-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 4px;
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .player-row .swatch { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; }
+  .player-row .host-badge {
+    font-size: 9px; letter-spacing: 0.2em; color: var(--accent);
+    border: 1px solid var(--accent); padding: 2px 6px; margin-left: auto;
+  }
+  .copy-btn { font-size: 10px; }
+
+  /* GAME */
+  .hud, .hud-golf {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px; gap: 6px;
+    font-family: 'Space Mono', monospace;
+    z-index: 5;
+    flex-wrap: nowrap;
+    min-height: 40px;
+  }
+  .hud-golf { overflow-x: auto; }
+  .hud-team { display: flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: 0.15em; flex-shrink: 0; }
+  .hud-team .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .hud-team.red .dot { background: var(--red); }
+  .hud-team.blue .dot { background: var(--blue); }
+  .hud-score { font-size: 20px; font-weight: 700; min-width: 18px; text-align: center; }
+  .pill, .hud-mid {
+    border: 1px solid var(--line);
+    padding: 4px 8px;
+    font-size: 9px; letter-spacing: 0.12em;
+    color: var(--muted);
+    background: var(--bg-2);
+    white-space: nowrap; flex-shrink: 0;
+  }
+  .pill strong { color: var(--ink); font-weight: 700; margin-left: 2px; }
+  .pill.accent { color: var(--accent); border-color: var(--accent); }
+  .hud-back {
+    background: transparent; border: 1px solid var(--line);
+    color: var(--muted); padding: 4px 8px;
+    cursor: pointer; font-family: inherit;
+    font-size: 9px; letter-spacing: 0.15em;
+    flex-shrink: 0;
+  }
+
+  .canvas-wrap { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  canvas { display: block; background: var(--canvas-bg); touch-action: none; }
+
+  .flash { position: absolute; inset: 0; background: var(--accent); opacity: 0; pointer-events: none; z-index: 8; }
+  .flash.show { animation: flashAnim 0.6s ease-out; }
+  @keyframes flashAnim { 0% { opacity: 0.55; } 100% { opacity: 0; } }
+  .goal-text {
+    position: absolute; top: 35%; left: 50%;
+    transform: translate(-50%, -50%) scale(0.5);
+    font-family: 'Space Mono', monospace;
+    font-size: 36px; font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.1em; opacity: 0;
+    pointer-events: none; z-index: 9;
+    text-align: center; white-space: nowrap;
+  }
+  .goal-text.show { animation: goalAnim 1.6s ease-out; }
+  @keyframes goalAnim {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+    20% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+    80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.05); }
+  }
+
+  /* Toasts */
+  .toasts { position: absolute; top: 60px; left: 12px; right: 12px; z-index: 10; pointer-events: none; }
+  .toast {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    animation: toastSlide 0.3s ease, toastFade 0.5s ease 3.5s forwards;
+  }
+  @keyframes toastSlide { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  @keyframes toastFade { to { opacity: 0; transform: translateY(-10px); } }
+
+  /* Endgame */
+  .endgame {
+    position: absolute; inset: 0;
+    background: var(--bg);
+    z-index: 12;
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .endgame.show { display: flex; }
+  .endgame h2 {
+    font-family: 'Space Mono', monospace;
+    font-size: 24px; letter-spacing: 0.2em;
+    margin: 0 0 4px; color: var(--accent);
+  }
+  .endgame .subtitle { color: var(--muted); font-size: 11px; letter-spacing: 0.25em; text-transform: uppercase; margin-bottom: 16px; }
+  .results-table {
+    width: 100%; max-width: 440px;
+    border-collapse: collapse;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+  }
+  .results-table th, .results-table td {
+    padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: center;
+  }
+  .results-table th { color: var(--muted); font-weight: 400; font-size: 10px; letter-spacing: 0.2em; }
+  .results-table tr.winner td { color: var(--accent); font-weight: 700; }
+</style>
+</head>
+<body>
+
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<div id="app">
+
+  <!-- ============ HOME ============ -->
+  <div class="screen active" id="homeScreen">
+    <div class="top-bar">
+      <h1 class="brand">HEX<span class="dot">·</span>BALL</h1>
+      <button class="icon-btn" id="themeToggle" aria-label="toggle theme">☼</button>
+    </div>
+    <div class="tag">— online multiplayer —</div>
+    <div class="conn-status" id="connStatus"><span class="dot"></span><span id="connLabel">Connecting…</span></div>
+
+    <div class="label">Your Name</div>
+    <input type="text" id="nameInput" class="text-input name-input" placeholder="Enter your name" maxlength="20" />
+
+    <div class="label">Mode</div>
+    <div id="modeOpts">
+      <div class="mode-card active" data-mode="match">
+        <div class="title">⚽ FOOTBALL</div>
+        <div class="desc">Teams of red vs blue. First to N goals wins.</div>
+      </div>
+      <div class="mode-card" data-mode="golf">
+        <div class="title">⛳ GOLF FIGHT</div>
+        <div class="desc">Everyone has their own ball. Knock other balls into water. Lowest strokes wins.</div>
+      </div>
+    </div>
+
+    <button class="btn-primary" id="createRoomBtn">▶ CREATE ROOM</button>
+    <button class="btn-secondary" id="showJoinBtn">JOIN WITH CODE</button>
+  </div>
+
+  <!-- ============ JOIN ============ -->
+  <div class="screen" id="joinScreen">
+    <div class="top-bar">
+      <h1 class="brand">JOIN</h1>
+      <button class="icon-btn" id="joinBackBtn">←</button>
+    </div>
+    <div class="tag">— enter room code —</div>
+    <input type="text" id="codeInput" class="text-input code-input" placeholder="ABCD" maxlength="4" autocapitalize="characters" />
+    <button class="btn-primary" id="joinRoomBtn">JOIN</button>
+    <div id="joinError" style="margin-top:12px; color:var(--red); font-size:11px; text-align:center;"></div>
+  </div>
+
+  <!-- ============ LOBBY ============ -->
+  <div class="screen" id="lobbyScreen">
+    <div class="top-bar">
+      <h1 class="brand">LOBBY</h1>
+      <button class="icon-btn" id="lobbyLeaveBtn">×</button>
+    </div>
+    <div class="tag" id="lobbyMode">— football match —</div>
+    <div class="lobby-code" id="lobbyCode">----</div>
+    <div class="lobby-hint">↑ share this code with friends</div>
+    <button class="btn-secondary copy-btn" id="copyLinkBtn">COPY LINK</button>
+
+    <div id="hostOpts" style="display:none;">
+      <div id="matchOpts">
+        <div class="label">Arena</div>
+        <div class="options" id="arenaOpts">
+          <button class="opt active" data-arena="classic">Classic</button>
+          <button class="opt" data-arena="big">Big Pitch</button>
+          <button class="opt" data-arena="tight">Tight</button>
+          <button class="opt" data-arena="hex">Hex Court</button>
+        </div>
+        <div class="label">First To</div>
+        <div class="options three" id="goalsOpts">
+          <button class="opt active" data-goals="3">3 goals</button>
+          <button class="opt" data-goals="5">5 goals</button>
+          <button class="opt" data-goals="7">7 goals</button>
+        </div>
+      </div>
+      <div id="golfOpts" style="display:none;">
+        <div class="label">Course Length</div>
+        <div class="options three" id="courseOpts">
+          <button class="opt" data-course="3">3 holes</button>
+          <button class="opt active" data-course="6">6 holes</button>
+          <button class="opt" data-course="9">9 holes</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="label">Players (<span id="playerCount">0</span>/6)</div>
+    <div class="player-list" id="playerList"></div>
+
+    <button class="btn-primary" id="startBtn" style="margin-top:auto;">▶ START GAME</button>
+    <div id="lobbyHint" style="text-align:center; color:var(--muted); font-size:10px; letter-spacing:0.2em; margin-top:8px;"></div>
+  </div>
+
+  <!-- ============ GAME ============ -->
+  <div class="screen" id="gameScreen" style="padding: max(env(safe-area-inset-top),8px) 0 max(env(safe-area-inset-bottom),8px);">
+    <div class="hud" id="matchHud" style="display:none;">
+      <div class="hud-team red"><span class="dot"></span><span class="hud-score" id="redScore">0</span></div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span class="hud-mid" id="timer">00:00</span>
+        <button class="hud-back" id="exitBtn1">EXIT</button>
+      </div>
+      <div class="hud-team blue"><span class="hud-score" id="blueScore">0</span><span class="dot"></span></div>
+    </div>
+    <div class="hud-golf" id="golfHud" style="display:none;">
+      <span class="pill">HOLE <strong id="holeNum">1</strong>/<strong id="holeTotal">6</strong></span>
+      <span class="pill accent">YOU <strong id="myStrokes">0</strong></span>
+      <span class="pill" id="leaderPill">LEAD <strong id="leaderName">-</strong></span>
+      <button class="hud-back" id="exitBtn2">EXIT</button>
+    </div>
+
+    <div class="canvas-wrap" id="canvasWrap">
+      <canvas id="canvas"></canvas>
+      <div class="flash" id="flash"></div>
+      <div class="goal-text" id="goalText">GOAL</div>
+      <div class="toasts" id="toasts"></div>
+    </div>
+
+    <div class="endgame" id="endgame">
+      <h2 id="endTitle">RESULTS</h2>
+      <div class="subtitle">— round complete —</div>
+      <table class="results-table" id="resultsTable"></table>
+      <button class="btn-primary" id="backToLobbyBtn" style="max-width:300px; margin-top:16px;">BACK TO LOBBY</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+'use strict';
+
+// ============== THEME ==============
+const themeToggle = document.getElementById('themeToggle');
+const themeColorMeta = document.getElementById('themeColor');
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  themeColorMeta.setAttribute('content', t === 'light' ? '#f3f1ec' : '#0e1116');
+  themeToggle.textContent = t === 'light' ? '☾' : '☼';
+  try { localStorage.setItem('hexball-theme', t); } catch(e){}
+  refreshTheme();
+}
+const savedTheme = (() => { try { return localStorage.getItem('hexball-theme'); } catch(e) { return null; } })() || 'light';
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+let theme = {};
+function refreshTheme() {
+  theme = {
+    bg: cssVar('--bg'),
+    grass: cssVar('--grass'),
+    grassStripe: cssVar('--grass-stripe'),
+    fieldLine: cssVar('--field-line'),
+    ink: cssVar('--ink'),
+    muted: cssVar('--muted'),
+    accent: cssVar('--accent'),
+    red: cssVar('--red'),
+    blue: cssVar('--blue'),
+    line: cssVar('--line'),
+    bg2: cssVar('--bg-2'),
+    isLight: document.documentElement.getAttribute('data-theme') === 'light',
+  };
+}
+applyTheme(savedTheme);
+themeToggle.addEventListener('click', () => applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'));
+
+// ============== STATE ==============
+const localState = {
+  ws: null,
+  connected: false,
+  playerId: null,
+  myName: '',
+  selectedMode: 'match',
+  roomCode: null,
+  isHost: false,
+  matchOpts: { arena: 'classic', goalsToWin: 3 },
+  golfOpts: { courseLength: 6 },
+  // server-pushed state
+  game: {
+    mode: null, state: 'lobby',
+    players: [],
+    ball: null,
+    scoreRed: 0, scoreBlue: 0,
+    arena: 'classic', goalsToWin: 3,
+    matchTime: 0,
+    currentHole: 0, totalHoles: 6,
+    holeData: null,
+    goalCelebration: false,
+  },
+};
+
+// Load saved name
+try { localState.myName = localStorage.getItem('hexball-name') || ''; } catch(e){}
+const nameInput = document.getElementById('nameInput');
+nameInput.value = localState.myName;
+nameInput.addEventListener('input', () => {
+  localState.myName = nameInput.value.trim();
+  try { localStorage.setItem('hexball-name', localState.myName); } catch(e){}
+});
+
+// ============== SCREENS ==============
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// ============== WEBSOCKET ==============
+const connStatus = document.getElementById('connStatus');
+const connLabel = document.getElementById('connLabel');
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = proto + '//' + location.host;
+  const ws = new WebSocket(url);
+  localState.ws = ws;
+
+  ws.addEventListener('open', () => {
+    localState.connected = true;
+    connStatus.classList.add('connected');
+    connStatus.classList.remove('error');
+    connLabel.textContent = 'Connected';
+    // If URL has #CODE, try to auto-join
+    const hash = location.hash.replace('#', '').toUpperCase();
+    if (hash && /^[A-Z0-9]{4}$/.test(hash)) {
+      autoJoinCode = hash;
+      maybeAutoJoin();
+    }
+  });
+  ws.addEventListener('close', () => {
+    localState.connected = false;
+    connStatus.classList.remove('connected');
+    connStatus.classList.add('error');
+    connLabel.textContent = 'Disconnected — retrying…';
+    setTimeout(connect, 2000);
+  });
+  ws.addEventListener('error', () => { /* handled by close */ });
+  ws.addEventListener('message', (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch (err) { return; }
+    handleMessage(msg);
+  });
+}
+
+let autoJoinCode = null;
+function maybeAutoJoin() {
+  if (!autoJoinCode || !localState.connected) return;
+  if (!localState.myName) {
+    // prompt user via name field
+    showScreen('homeScreen');
+    nameInput.focus();
+    return;
+  }
+  send({ type: 'joinRoom', code: autoJoinCode, name: localState.myName });
+  autoJoinCode = null;
+}
+
+function send(msg) {
+  if (!localState.ws || localState.ws.readyState !== 1) return;
+  localState.ws.send(JSON.stringify(msg));
+}
+
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'welcome':
+      localState.playerId = msg.playerId;
+      break;
+    case 'roomCreated':
+    case 'roomJoined':
+      localState.roomCode = msg.code;
+      location.hash = msg.code;
+      showScreen('lobbyScreen');
+      document.getElementById('lobbyCode').textContent = msg.code;
+      break;
+    case 'lobby':
+      updateLobby(msg);
+      break;
+    case 'gameStart':
+      localState.game.mode = msg.mode;
+      onGameStart();
+      break;
+    case 'state':
+      Object.assign(localState.game, msg);
+      break;
+    case 'newHole':
+      localState.game.currentHole = msg.hole;
+      localState.game.holeData = msg.holeData;
+      flashGoalText('HOLE ' + (msg.hole + 1), theme.accent);
+      break;
+    case 'goal':
+      localState.game.scoreRed = msg.scoreRed;
+      localState.game.scoreBlue = msg.scoreBlue;
+      flashGoalText('GOAL!', msg.scorer === 'red' ? theme.red : theme.blue);
+      if (navigator.vibrate) navigator.vibrate(40);
+      break;
+    case 'splash':
+      addToast('💦 ' + msg.name + ' splashed (+1)');
+      break;
+    case 'holed': {
+      const diff = msg.strokes - msg.par;
+      let tag;
+      if (msg.strokes === 1) tag = 'HOLE IN ONE!';
+      else if (diff <= -2) tag = 'EAGLE';
+      else if (diff === -1) tag = 'BIRDIE';
+      else if (diff === 0) tag = 'PAR';
+      else if (diff === 1) tag = 'BOGEY';
+      else tag = '+' + diff;
+      addToast('🏁 ' + msg.name + ' — ' + tag + ' (' + msg.strokes + ')');
+      if (msg.playerId === localState.playerId) flashGoalText(tag, theme.accent);
+      break;
+    }
+    case 'matchEnd':
+      showMatchEnd(msg);
+      break;
+    case 'golfEnd':
+      showGolfEnd(msg);
+      break;
+    case 'roomState':
+      if (msg.state === 'lobby') {
+        document.getElementById('endgame').classList.remove('show');
+        showScreen('lobbyScreen');
+      }
+      break;
+    case 'chat':
+      addToast(msg.name + ': ' + msg.text);
+      break;
+    case 'error':
+      document.getElementById('joinError').textContent = msg.message;
+      break;
+  }
+}
+
+connect();
+
+// ============== HOME ==============
+document.querySelectorAll('#modeOpts .mode-card').forEach(card => {
+  card.addEventListener('click', () => {
+    document.querySelectorAll('#modeOpts .mode-card').forEach(c => c.classList.remove('active'));
+    card.classList.add('active');
+    localState.selectedMode = card.dataset.mode;
+  });
+});
+
+document.getElementById('createRoomBtn').addEventListener('click', () => {
+  if (!localState.myName) { nameInput.focus(); nameInput.placeholder = '← name required'; return; }
+  if (!localState.connected) return;
+  send({
+    type: 'createRoom',
+    mode: localState.selectedMode,
+    name: localState.myName,
+    opts: localState.selectedMode === 'match' ? localState.matchOpts : localState.golfOpts,
+  });
+});
+document.getElementById('showJoinBtn').addEventListener('click', () => {
+  showScreen('joinScreen');
+  setTimeout(() => document.getElementById('codeInput').focus(), 100);
+});
+
+// ============== JOIN ==============
+document.getElementById('joinBackBtn').addEventListener('click', () => showScreen('homeScreen'));
+const codeInput = document.getElementById('codeInput');
+codeInput.addEventListener('input', () => {
+  codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+});
+document.getElementById('joinRoomBtn').addEventListener('click', () => {
+  if (!localState.myName) {
+    showScreen('homeScreen');
+    nameInput.focus(); nameInput.placeholder = '← name required';
+    return;
+  }
+  const code = codeInput.value.trim().toUpperCase();
+  if (code.length !== 4) {
+    document.getElementById('joinError').textContent = 'Code must be 4 characters';
+    return;
+  }
+  document.getElementById('joinError').textContent = '';
+  send({ type: 'joinRoom', code, name: localState.myName });
+});
+
+// ============== LOBBY ==============
+document.getElementById('lobbyLeaveBtn').addEventListener('click', leaveRoomToHome);
+document.getElementById('copyLinkBtn').addEventListener('click', () => {
+  const link = location.origin + '#' + localState.roomCode;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(link).then(() => {
+      const btn = document.getElementById('copyLinkBtn');
+      const orig = btn.textContent;
+      btn.textContent = 'COPIED ✓';
+      setTimeout(() => btn.textContent = orig, 1500);
+    });
+  }
+});
+document.getElementById('startBtn').addEventListener('click', () => {
+  if (!localState.isHost) return;
+  send({ type: 'startGame' });
+});
+
+function bindOptGroup(id, key, attr, scope, parser = v => v) {
+  document.querySelectorAll('#' + id + ' .opt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!localState.isHost) return;
+      document.querySelectorAll('#' + id + ' .opt').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      localState[scope][key] = parser(btn.dataset[attr]);
+      if (scope === 'matchOpts') send({ type: 'updateOpts', matchOpts: localState.matchOpts });
+      else send({ type: 'updateOpts', golfOpts: localState.golfOpts });
+    });
+  });
+}
+bindOptGroup('arenaOpts', 'arena', 'arena', 'matchOpts');
+bindOptGroup('goalsOpts', 'goalsToWin', 'goals', 'matchOpts', v => parseInt(v, 10));
+bindOptGroup('courseOpts', 'courseLength', 'course', 'golfOpts', v => parseInt(v, 10));
+
+function updateLobby(msg) {
+  localState.roomCode = msg.code;
+  localState.isHost = msg.hostId === localState.playerId;
+  localState.matchOpts = msg.matchOpts;
+  localState.golfOpts = msg.golfOpts;
+  localState.game.mode = msg.mode;
+
+  document.getElementById('lobbyCode').textContent = msg.code;
+  document.getElementById('lobbyMode').textContent = msg.mode === 'match' ? '— football match —' : '— golf fight —';
+  document.getElementById('hostOpts').style.display = localState.isHost ? 'block' : 'none';
+  document.getElementById('matchOpts').style.display = msg.mode === 'match' ? 'block' : 'none';
+  document.getElementById('golfOpts').style.display = msg.mode === 'golf' ? 'block' : 'none';
+
+  // Sync option buttons
+  if (msg.mode === 'match') {
+    document.querySelectorAll('#arenaOpts .opt').forEach(b => b.classList.toggle('active', b.dataset.arena === msg.matchOpts.arena));
+    document.querySelectorAll('#goalsOpts .opt').forEach(b => b.classList.toggle('active', parseInt(b.dataset.goals) === msg.matchOpts.goalsToWin));
+  } else {
+    document.querySelectorAll('#courseOpts .opt').forEach(b => b.classList.toggle('active', parseInt(b.dataset.course) === msg.golfOpts.courseLength));
+  }
+
+  // Player list
+  document.getElementById('playerCount').textContent = msg.players.length;
+  const list = document.getElementById('playerList');
+  list.innerHTML = '';
+  for (const p of msg.players) {
+    const row = document.createElement('div');
+    row.className = 'player-row';
+    row.innerHTML = `
+      <span class="swatch" style="background:${p.color}"></span>
+      <span>${escapeHtml(p.name)}${p.id === localState.playerId ? ' (you)' : ''}</span>
+      ${p.isHost ? '<span class="host-badge">HOST</span>' : ''}
+    `;
+    list.appendChild(row);
+  }
+
+  // Start button visibility
+  const startBtn = document.getElementById('startBtn');
+  const hint = document.getElementById('lobbyHint');
+  if (localState.isHost) {
+    startBtn.style.display = 'block';
+    startBtn.disabled = msg.players.length < 1;
+    hint.textContent = msg.players.length < 2 ? '↑ playable solo, but more is more fun' : '';
+  } else {
+    startBtn.style.display = 'none';
+    hint.textContent = 'waiting for host to start…';
+  }
+
+  if (document.getElementById('lobbyScreen').classList.contains('active') === false &&
+      !document.getElementById('gameScreen').classList.contains('active')) {
+    showScreen('lobbyScreen');
+  }
+}
+
+function leaveRoomToHome() {
+  if (localState.ws && localState.ws.readyState === 1) {
+    send({ type: 'leaveRoom' });
+  }
+  location.hash = '';
+  localState.roomCode = null;
+  localState.isHost = false;
+  document.getElementById('endgame').classList.remove('show');
+  showScreen('homeScreen');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+// ============== GAME ==============
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let scale = 1, displayW = 0, displayH = 0;
+let arenaDisplayW = 540, arenaDisplayH = 900;
+
+const arenas = {
+  classic: { w: 540, h: 900, goalW: 160 },
+  big:     { w: 600, h: 1100, goalW: 180 },
+  tight:   { w: 480, h: 720, goalW: 140 },
+  hex:     { w: 540, h: 900, goalW: 160, hex: true },
+};
+
+function fitCanvas(w, h) {
+  arenaDisplayW = w; arenaDisplayH = h;
+  const wrap = document.getElementById('canvasWrap');
+  const wW = wrap.clientWidth, wH = wrap.clientHeight;
+  const aspect = w / h;
+  let dw = wW, dh = wW / aspect;
+  if (dh > wH) { dh = wH; dw = wH * aspect; }
+  displayW = dw; displayH = dh;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(dw * dpr);
+  canvas.height = Math.round(dh * dpr);
+  canvas.style.width = dw + 'px';
+  canvas.style.height = dh + 'px';
+  scale = dpr;
+}
+
+window.addEventListener('resize', () => {
+  if (document.getElementById('gameScreen').classList.contains('active')) refitForCurrentMode();
+});
+function refitForCurrentMode() {
+  if (localState.game.mode === 'match') {
+    const a = arenas[localState.game.arena] || arenas.classic;
+    fitCanvas(a.w, a.h);
+  } else if (localState.game.mode === 'golf' && localState.game.holeData) {
+    fitCanvas(localState.game.holeData.w, localState.game.holeData.h);
+  } else {
+    fitCanvas(540, 900);
+  }
+}
+
+function onGameStart() {
+  showScreen('gameScreen');
+  document.getElementById('endgame').classList.remove('show');
+  document.getElementById('matchHud').style.display = localState.game.mode === 'match' ? 'flex' : 'none';
+  document.getElementById('golfHud').style.display = localState.game.mode === 'golf' ? 'flex' : 'none';
+  setTimeout(refitForCurrentMode, 50);
+  window.scrollTo(0, 1);
+}
+
+// ============== INPUT ==============
+const input = { ax: 0, ay: 0, kicking: false, boosting: false };
+let ctrl = {
+  joyHintX: 0, joyHintY: 0,
+  joyOriginX: 0, joyOriginY: 0,
+  joyStickX: 0, joyStickY: 0,
+  joyActive: false, joyTouchId: null,
+  kickX: 0, kickY: 0, kickR: 44,
+  boostX: 0, boostY: 0, boostR: 30,
+  kickTouchId: null, boostTouchId: null,
+  kickPressed: false, boostPressed: false,
+};
+const JOY_RADIUS_DISPLAY = 48;
+const JOY_HINT_R = 38;
+
+function recomputeControlGeometry() {
+  const margin = Math.max(20, Math.min(displayW, displayH) * 0.05);
+  ctrl.kickX = displayW - margin - ctrl.kickR;
+  ctrl.kickY = displayH - margin - ctrl.kickR;
+  ctrl.boostX = ctrl.kickX - ctrl.kickR - ctrl.boostR - 12;
+  ctrl.boostY = ctrl.kickY - ctrl.kickR - ctrl.boostR + 8;
+  ctrl.joyHintX = margin + JOY_HINT_R;
+  ctrl.joyHintY = displayH - margin - JOY_HINT_R;
+}
+function getCanvasPoint(cx, cy) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: cx - rect.left, y: cy - rect.top };
+}
+function inCircle(x, y, cx, cy, r) { return (x-cx)**2 + (y-cy)**2 <= r*r; }
+
+canvas.addEventListener('touchstart', e => {
+  for (const t of e.changedTouches) {
+    const p = getCanvasPoint(t.clientX, t.clientY);
+    if (p.x < 0 || p.y < 0 || p.x > displayW || p.y > displayH) continue;
+    if (inCircle(p.x, p.y, ctrl.kickX, ctrl.kickY, ctrl.kickR + 8) && ctrl.kickTouchId === null) {
+      ctrl.kickTouchId = t.identifier; ctrl.kickPressed = true; input.kicking = true;
+    } else if (inCircle(p.x, p.y, ctrl.boostX, ctrl.boostY, ctrl.boostR + 8) && ctrl.boostTouchId === null) {
+      ctrl.boostTouchId = t.identifier; ctrl.boostPressed = true; input.boosting = true;
+    } else if (ctrl.joyTouchId === null && p.x < displayW * 0.5) {
+      ctrl.joyTouchId = t.identifier;
+      ctrl.joyActive = true;
+      ctrl.joyOriginX = p.x; ctrl.joyOriginY = p.y;
+      ctrl.joyStickX = p.x; ctrl.joyStickY = p.y;
+    }
+  }
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  for (const t of e.changedTouches) {
+    if (t.identifier === ctrl.joyTouchId) {
+      const p = getCanvasPoint(t.clientX, t.clientY);
+      let dx = p.x - ctrl.joyOriginX, dy = p.y - ctrl.joyOriginY;
+      const d = Math.hypot(dx, dy);
+      if (d > JOY_RADIUS_DISPLAY) { dx = dx/d*JOY_RADIUS_DISPLAY; dy = dy/d*JOY_RADIUS_DISPLAY; }
+      ctrl.joyStickX = ctrl.joyOriginX + dx;
+      ctrl.joyStickY = ctrl.joyOriginY + dy;
+      if (d > 8) {
+        const norm = Math.max(d, JOY_RADIUS_DISPLAY);
+        let ix = (p.x - ctrl.joyOriginX) / norm, iy = (p.y - ctrl.joyOriginY) / norm;
+        const m = Math.hypot(ix, iy);
+        if (m > 1) { ix /= m; iy /= m; }
+        input.ax = ix; input.ay = iy;
+      } else { input.ax = 0; input.ay = 0; }
+    }
+  }
+  e.preventDefault();
+}, { passive: false });
+
+function endTouch(t) {
+  if (t.identifier === ctrl.joyTouchId) { ctrl.joyTouchId = null; ctrl.joyActive = false; input.ax = 0; input.ay = 0; }
+  else if (t.identifier === ctrl.kickTouchId) { ctrl.kickTouchId = null; ctrl.kickPressed = false; input.kicking = false; }
+  else if (t.identifier === ctrl.boostTouchId) { ctrl.boostTouchId = null; ctrl.boostPressed = false; input.boosting = false; }
+}
+canvas.addEventListener('touchend', e => { for (const t of e.changedTouches) endTouch(t); e.preventDefault(); }, { passive: false });
+canvas.addEventListener('touchcancel', e => { for (const t of e.changedTouches) endTouch(t); }, { passive: false });
+
+// Mouse fallback
+let mouseDown = false, mouseTarget = null;
+canvas.addEventListener('mousedown', e => {
+  const p = getCanvasPoint(e.clientX, e.clientY);
+  if (inCircle(p.x, p.y, ctrl.kickX, ctrl.kickY, ctrl.kickR + 8)) { mouseTarget = 'kick'; ctrl.kickPressed = true; input.kicking = true; }
+  else if (inCircle(p.x, p.y, ctrl.boostX, ctrl.boostY, ctrl.boostR + 8)) { mouseTarget = 'boost'; ctrl.boostPressed = true; input.boosting = true; }
+  else if (p.x < displayW * 0.5) {
+    mouseTarget = 'joy';
+    ctrl.joyActive = true;
+    ctrl.joyOriginX = p.x; ctrl.joyOriginY = p.y;
+    ctrl.joyStickX = p.x; ctrl.joyStickY = p.y;
+  }
+  mouseDown = true;
+});
+window.addEventListener('mousemove', e => {
+  if (!mouseDown || mouseTarget !== 'joy') return;
+  const p = getCanvasPoint(e.clientX, e.clientY);
+  let dx = p.x - ctrl.joyOriginX, dy = p.y - ctrl.joyOriginY;
+  const d = Math.hypot(dx, dy);
+  if (d > JOY_RADIUS_DISPLAY) { dx = dx/d*JOY_RADIUS_DISPLAY; dy = dy/d*JOY_RADIUS_DISPLAY; }
+  ctrl.joyStickX = ctrl.joyOriginX + dx;
+  ctrl.joyStickY = ctrl.joyOriginY + dy;
+  if (d > 8) {
+    const norm = Math.max(d, JOY_RADIUS_DISPLAY);
+    let ix = (p.x - ctrl.joyOriginX) / norm, iy = (p.y - ctrl.joyOriginY) / norm;
+    const m = Math.hypot(ix, iy); if (m > 1) { ix /= m; iy /= m; }
+    input.ax = ix; input.ay = iy;
+  } else { input.ax = 0; input.ay = 0; }
+});
+window.addEventListener('mouseup', () => {
+  if (mouseTarget === 'joy') { ctrl.joyActive = false; input.ax = 0; input.ay = 0; }
+  if (mouseTarget === 'kick') { ctrl.kickPressed = false; input.kicking = false; }
+  if (mouseTarget === 'boost') { ctrl.boostPressed = false; input.boosting = false; }
+  mouseDown = false; mouseTarget = null;
+});
+
+// Send input at 30Hz
+setInterval(() => {
+  if (localState.game.state === 'playing' && localState.connected) {
+    send({ type: 'input', input });
+  }
+}, 1000/30);
+
+// ============== RENDER LOOP ==============
+function loop() {
+  if (document.getElementById('gameScreen').classList.contains('active')) {
+    draw();
+    updateHUD();
+  }
+  requestAnimationFrame(loop);
+}
+
+function updateHUD() {
+  if (localState.game.mode === 'match') {
+    document.getElementById('redScore').textContent = localState.game.scoreRed || 0;
+    document.getElementById('blueScore').textContent = localState.game.scoreBlue || 0;
+    const t = localState.game.matchTime || 0;
+    const m = Math.floor(t / 60), s = Math.floor(t % 60);
+    document.getElementById('timer').textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+  } else if (localState.game.mode === 'golf') {
+    document.getElementById('holeNum').textContent = (localState.game.currentHole || 0) + 1;
+    document.getElementById('holeTotal').textContent = localState.game.totalHoles || 6;
+    const me = (localState.game.players || []).find(p => p.id === localState.playerId);
+    document.getElementById('myStrokes').textContent = me ? me.strokes : 0;
+    // leader
+    const players = (localState.game.players || []).slice();
+    if (players.length) {
+      players.sort((a, b) => a.strokes - b.strokes);
+      document.getElementById('leaderName').textContent = players[0].name.slice(0, 8);
+    }
+  }
+}
+
+function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // World transform
+  let aw = arenaDisplayW, ah = arenaDisplayH;
+  if (localState.game.mode === 'match') {
+    const a = arenas[localState.game.arena] || arenas.classic;
+    aw = a.w; ah = a.h;
+  } else if (localState.game.holeData) {
+    aw = localState.game.holeData.w; ah = localState.game.holeData.h;
+  }
+  if (aw !== arenaDisplayW || ah !== arenaDisplayH) {
+    fitCanvas(aw, ah);
+  }
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+
+  if (localState.game.mode === 'match') drawMatch();
+  else if (localState.game.mode === 'golf') drawGolf();
+
+  // Controls layer (display pixels)
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  drawControls();
+}
+
+function drawMatch() {
+  const a = arenas[localState.game.arena] || arenas.classic;
+  const W = a.w, H = a.h, gw = a.goalW;
+  const gL = (W - gw) / 2, gR = (W + gw) / 2;
+  // canvas is sized exactly to the arena's display dims (no letterboxing offset needed)
+  const sx = displayW / W;
+  ctx.save();
+  ctx.scale(sx, sx);
+
+  ctx.fillStyle = theme.grass; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = theme.grassStripe;
+  for (let i = 0; i < H; i += 60) if ((i/60)%2 === 0) ctx.fillRect(0, i, W, 60);
+
+  if (a.hex) {
+    ctx.fillStyle = theme.bg;
+    const cut = 90;
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(cut,0); ctx.lineTo(0,cut); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W,0); ctx.lineTo(W-cut,0); ctx.lineTo(W,cut); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0,H); ctx.lineTo(cut,H); ctx.lineTo(0,H-cut); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W,H); ctx.lineTo(W-cut,H); ctx.lineTo(W,H-cut); ctx.closePath(); ctx.fill();
+  }
+
+  ctx.strokeStyle = theme.fieldLine; ctx.lineWidth = 2;
+  ctx.strokeRect(2, 2, W-4, H-4);
+  ctx.beginPath(); ctx.moveTo(2, H/2); ctx.lineTo(W-2, H/2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(W/2, H/2, 70, 0, Math.PI*2); ctx.stroke();
+  ctx.fillStyle = theme.fieldLine;
+  ctx.beginPath(); ctx.arc(W/2, H/2, 4, 0, Math.PI*2); ctx.fill();
+
+  // goals
+  ctx.fillStyle = hexA(theme.blue, 0.18);
+  ctx.fillRect(gL, -20, gw, 22);
+  ctx.strokeStyle = theme.blue; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(gL, 0); ctx.lineTo(gR, 0); ctx.stroke();
+  ctx.fillStyle = hexA(theme.red, 0.18);
+  ctx.fillRect(gL, H-2, gw, 22);
+  ctx.strokeStyle = theme.red;
+  ctx.beginPath(); ctx.moveTo(gL, H); ctx.lineTo(gR, H); ctx.stroke();
+
+  // posts
+  ctx.fillStyle = theme.fieldLine;
+  [[gL,0],[gR,0],[gL,H],[gR,H]].forEach(([x,y]) => { ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI*2); ctx.fill(); });
+
+  // players
+  for (const p of (localState.game.players || [])) {
+    const c = p.team === 'red' ? theme.red : (p.team === 'blue' ? theme.blue : p.color);
+    drawPlayer(p.x, p.y, 22, c, p.boosting, p.id === localState.playerId, p.name);
+  }
+  // ball
+  if (localState.game.ball) drawBall(localState.game.ball.x, localState.game.ball.y, 14);
+
+  ctx.restore();
+}
+
+function drawGolf() {
+  const h = localState.game.holeData;
+  if (!h) return;
+  const W = h.w, H = h.h;
+  const sx = displayW / W;
+  ctx.save();
+  ctx.scale(sx, sx);
+
+  ctx.fillStyle = theme.grass; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = theme.grassStripe;
+  for (let i = 0; i < H; i += 50) if ((i/50)%2 === 0) ctx.fillRect(0, i, W, 50);
+
+  for (const s of (h.sand||[])) {
+    const grad = ctx.createRadialGradient(s.x, s.y, s.r*0.5, s.x, s.y, s.r);
+    grad.addColorStop(0, '#e6c886'); grad.addColorStop(1, '#c79c52');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+  }
+  for (const w of (h.water||[])) {
+    const grad = ctx.createLinearGradient(w.x, w.y, w.x, w.y+w.h);
+    grad.addColorStop(0, '#3a87b8'); grad.addColorStop(1, '#1a4a6e');
+    ctx.fillStyle = grad;
+    ctx.fillRect(w.x, w.y, w.w, w.h);
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.2;
+    const tt = performance.now()/700;
+    for (let r = 0; r < 3; r++) {
+      ctx.beginPath();
+      const yy = w.y + 8 + r*18;
+      ctx.moveTo(w.x+8, yy);
+      for (let x = 0; x <= w.w-16; x += 8) ctx.lineTo(w.x+8+x, yy + Math.sin((x+tt*30+r*10)/12)*2);
+      ctx.stroke();
+    }
+  }
+  ctx.fillStyle = theme.isLight ? '#5a4d35' : '#3a3328';
+  for (const w of (h.walls||[])) {
+    ctx.fillRect(w.x, w.y, w.w, w.h);
+    ctx.strokeStyle = theme.isLight ? '#8a7a5a' : '#5a4d35';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(w.x, w.y, w.w, w.h);
+  }
+  const tm = performance.now()/400;
+  for (const b of (h.bumpers||[])) {
+    const pulse = 1 + Math.sin(tm + b.x*0.01)*0.08;
+    const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r*1.4);
+    grad.addColorStop(0, '#fff5b8'); grad.addColorStop(0.7, '#f5d76e'); grad.addColorStop(1, '#a8862b');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r*pulse, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = theme.ink; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r*0.35, 0, Math.PI*2); ctx.fill();
+  }
+  const pt = performance.now()/300;
+  for (const p of (h.portals||[])) {
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(pt);
+    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, p.r);
+    grad.addColorStop(0, '#fff'); grad.addColorStop(0.4, p.color); grad.addColorStop(1, theme.ink);
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
+    for (let s = 0; s < 4; s++) {
+      ctx.beginPath();
+      ctx.arc(0, 0, p.r*0.6, s*Math.PI/2, s*Math.PI/2 + Math.PI/3);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  // cup + flag
+  const hh = h.hole;
+  ctx.fillStyle = theme.ink;
+  ctx.beginPath(); ctx.arc(hh.x, hh.y, hh.r, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = theme.muted; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(hh.x, hh.y); ctx.lineTo(hh.x, hh.y - 50); ctx.stroke();
+  ctx.fillStyle = theme.red;
+  ctx.beginPath();
+  ctx.moveTo(hh.x, hh.y - 50); ctx.lineTo(hh.x + 22, hh.y - 42); ctx.lineTo(hh.x, hh.y - 34);
+  ctx.closePath(); ctx.fill();
+
+  if (h.wind) {
+    ctx.save(); ctx.translate(40, 40);
+    ctx.rotate(Math.atan2(h.wind.fy, h.wind.fx));
+    ctx.strokeStyle = theme.ink; ctx.lineWidth = 2; ctx.globalAlpha = 0.7;
+    ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(14, 0); ctx.stroke();
+    ctx.fillStyle = theme.ink;
+    ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(8, -5); ctx.lineTo(8, 5); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = theme.muted; ctx.font = '10px "Space Mono", monospace';
+    ctx.fillText('WIND', 24, 70);
+  }
+
+  ctx.strokeStyle = theme.fieldLine; ctx.lineWidth = 2;
+  ctx.strokeRect(2, 2, W-4, H-4);
+
+  ctx.fillStyle = theme.muted;
+  ctx.font = 'bold 11px "Space Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText((h.name||'').toUpperCase(), W/2, H-12);
+  ctx.textAlign = 'left';
+
+  // players + their balls
+  for (const p of (localState.game.players || [])) {
+    if (!p.holed) {
+      drawPlayer(p.x, p.y, 22, p.color, p.boosting, p.id === localState.playerId, p.name);
+      if (p.ball) drawBall(p.ball.x, p.ball.y, 14, p.color, p.id === localState.playerId);
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawPlayer(x, y, r, color, boosting, isMe, name) {
+  if (boosting) {
+    const grad = ctx.createRadialGradient(x, y, r*0.5, x, y, r*2.2);
+    grad.addColorStop(0, hexA(theme.accent, 0.6));
+    grad.addColorStop(1, hexA(theme.accent, 0));
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(x, y, r*2.2, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.beginPath(); ctx.ellipse(x, y+r*0.85, r*0.85, r*0.3, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = isMe ? theme.accent : theme.ink;
+  ctx.lineWidth = isMe ? 3 : 2;
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  ctx.beginPath(); ctx.arc(x-r*0.3, y-r*0.3, r*0.4, 0, Math.PI*2); ctx.fill();
+
+  if (name) {
+    ctx.font = 'bold 11px "Space Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillText(name, x+1, y - r - 6 + 1);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(name, x, y - r - 6);
+    ctx.textAlign = 'left';
+  }
+}
+
+function drawBall(x, y, r, ownerColor, isMine) {
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = ownerColor || theme.ink;
+  ctx.lineWidth = ownerColor ? 3 : 1.5;
+  ctx.stroke();
+  ctx.fillStyle = theme.ink;
+  ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI*2); ctx.fill();
+  if (isMine) {
+    ctx.strokeStyle = theme.accent; ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.5 + 0.3*Math.sin(performance.now()/200);
+    ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI*2); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawControls() {
+  recomputeControlGeometry();
+  // joystick
+  if (ctrl.joyActive) {
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = hexA(theme.accent, theme.isLight ? 0.18 : 0.22);
+    ctx.beginPath(); ctx.arc(ctrl.joyOriginX, ctrl.joyOriginY, JOY_RADIUS_DISPLAY + 14, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = theme.accent; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = theme.accent;
+    ctx.beginPath(); ctx.arc(ctrl.joyStickX, ctrl.joyStickY, 26, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = theme.bg; ctx.lineWidth = 2; ctx.stroke();
+    ctx.globalAlpha = 1;
+  } else {
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = theme.isLight ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(ctrl.joyHintX, ctrl.joyHintY, JOY_HINT_R, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = theme.isLight ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)';
+    ctx.beginPath(); ctx.arc(ctrl.joyHintX, ctrl.joyHintY, 6, 0, Math.PI*2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  // boost
+  drawCircleButton(ctrl.boostX, ctrl.boostY, ctrl.boostR, theme.accent, 'BOOST', ctrl.boostPressed, true);
+  const me = (localState.game.players||[]).find(p => p.id === localState.playerId);
+  if (me) {
+    const frac = (me.boost || 0) / 100;
+    ctx.strokeStyle = theme.accent; ctx.lineWidth = 3; ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.arc(ctrl.boostX, ctrl.boostY, ctrl.boostR + 5, -Math.PI/2, -Math.PI/2 + frac*Math.PI*2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  // kick
+  drawCircleButton(ctrl.kickX, ctrl.kickY, ctrl.kickR, theme.red, 'KICK', ctrl.kickPressed, false);
+}
+
+function drawCircleButton(cx, cy, r, color, label, pressed, lightText) {
+  const sc = pressed ? 0.92 : 1;
+  const rr = r * sc;
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.beginPath(); ctx.arc(cx, cy + 3, rr, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = pressed ? color : hexA(color, 0.82);
+  ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = lightText ? theme.bg : '#fff';
+  const fs = Math.max(10, Math.round(rr * 0.32));
+  ctx.font = '700 ' + fs + 'px "Space Mono", monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, cx, cy + 1);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+}
+
+function hexA(hex, a) {
+  const h = (hex||'').replace('#','').trim();
+  if (!h) return `rgba(0,0,0,${a})`;
+  if (h.length === 3) {
+    const r = parseInt(h[0]+h[0],16), g = parseInt(h[1]+h[1],16), b = parseInt(h[2]+h[2],16);
+    return `rgba(${r},${g},${b},${a})`;
+  }
+  const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+// ============== EFFECTS ==============
+function flashGoalText(text, color) {
+  const f = document.getElementById('flash');
+  f.classList.remove('show'); void f.offsetWidth; f.classList.add('show');
+  const gt = document.getElementById('goalText');
+  gt.textContent = text;
+  gt.style.color = color || theme.accent;
+  gt.classList.remove('show'); void gt.offsetWidth; gt.classList.add('show');
+}
+function addToast(text) {
+  const div = document.createElement('div');
+  div.className = 'toast';
+  div.textContent = text;
+  document.getElementById('toasts').appendChild(div);
+  setTimeout(() => div.remove(), 4000);
+}
+
+// ============== ENDGAME ==============
+function showMatchEnd(msg) {
+  const youAreRed = (localState.game.players||[]).find(p => p.id === localState.playerId)?.team === 'red';
+  const won = (msg.winner === 'red' && youAreRed) || (msg.winner === 'blue' && !youAreRed);
+  document.getElementById('endTitle').textContent = won ? 'YOU WON' : 'DEFEAT';
+  document.getElementById('resultsTable').innerHTML = `
+    <tr><th>RED</th><th>BLUE</th></tr>
+    <tr><td style="font-size:32px;color:var(--red);">${msg.scoreRed}</td><td style="font-size:32px;color:var(--blue);">${msg.scoreBlue}</td></tr>
+  `;
+  document.getElementById('endgame').classList.add('show');
+}
+function showGolfEnd(msg) {
+  document.getElementById('endTitle').textContent = 'FINAL RESULTS';
+  let rows = '<tr><th>#</th><th>NAME</th><th>STROKES</th><th>VS PAR</th></tr>';
+  msg.results.forEach((r, i) => {
+    const ts = r.diff === 0 ? 'E' : (r.diff > 0 ? '+'+r.diff : ''+r.diff);
+    rows += `<tr class="${i === 0 ? 'winner' : ''}">
+      <td>${i+1}</td>
+      <td style="text-align:left;color:${r.color}">${escapeHtml(r.name)}${r.playerId === localState.playerId ? ' (you)' : ''}</td>
+      <td>${r.total}</td>
+      <td>${ts}</td>
+    </tr>`;
+  });
+  document.getElementById('resultsTable').innerHTML = rows;
+  document.getElementById('endgame').classList.add('show');
+}
+document.getElementById('backToLobbyBtn').addEventListener('click', () => {
+  document.getElementById('endgame').classList.remove('show');
+  showScreen('lobbyScreen');
+});
+
+document.getElementById('exitBtn1').addEventListener('click', leaveRoomToHome);
+document.getElementById('exitBtn2').addEventListener('click', leaveRoomToHome);
+
+// Prevent zoom/scroll
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+
+loop();
+</script>
+</body>
+</html>

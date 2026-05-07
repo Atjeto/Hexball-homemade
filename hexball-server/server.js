@@ -1,0 +1,876 @@
+// Hexball multiplayer server
+// Authoritative simulation: clients send inputs, server runs physics, broadcasts state.
+
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { WebSocketServer } = require('ws');
+
+const PORT = process.env.PORT || 3000;
+const TICK_HZ = 30;
+const TICK_MS = 1000 / TICK_HZ;
+
+// ============== CONSTANTS ==============
+const PLAYER_R = 22;
+const BALL_R = 14;
+const SUBSTEPS = 6;
+
+const MATCH_TUNING = {
+  fp: 0.92, fb: 0.992,
+  accel: 0.55, accelB: 0.95,    // doubled vs single-player (server is at 30Hz, not 60)
+  max: 4.5, maxB: 7.5,
+  kick: 6.5, bounce: 0.7,
+  ballBounce: 0.85, ballMax: 11,
+};
+const GOLF_TUNING = {
+  fp: 0.90, fb: 0.978,
+  accel: 0.50, accelB: 0.85,
+  max: 4.0, maxB: 6.5,
+  kick: 6.0, bounce: 0.65,
+  ballBounce: 0.82, ballMax: 9.5,
+};
+
+const TEAM_COLORS = ['#e54b4b', '#4b8bf5', '#5ec678', '#d44ba8', '#f5a623', '#7e57c2'];
+
+// ============== ARENAS ==============
+const arenas = {
+  classic: { w: 540, h: 900, goalW: 160 },
+  big:     { w: 600, h: 1100, goalW: 180 },
+  tight:   { w: 480, h: 720, goalW: 140 },
+  hex:     { w: 540, h: 900, goalW: 160, hex: true },
+};
+
+// ============== GOLF COURSES ==============
+const courses = [
+  { w:540,h:900,par:2, ballStart:{x:270,y:760}, hole:{x:270,y:140,r:22}, walls:[], bumpers:[{x:270,y:450,r:28}], sand:[], water:[], portals:[], wind:null, name:'Welcome' },
+  { w:540,h:900,par:3, ballStart:{x:130,y:780}, hole:{x:410,y:140,r:22}, walls:[], bumpers:[], sand:[{x:350,y:700,r:70}], water:[{x:170,y:430,w:200,h:100}], portals:[], wind:null, name:'River Bend' },
+  { w:540,h:900,par:4, ballStart:{x:270,y:800}, hole:{x:270,y:100,r:24}, walls:[], bumpers:[{x:180,y:600,r:26},{x:360,y:540,r:26},{x:270,y:460,r:26},{x:150,y:380,r:26},{x:390,y:320,r:26}], sand:[], water:[], portals:[], wind:null, name:'Pinball Alley' },
+  { w:540,h:900,par:3, ballStart:{x:100,y:800}, hole:{x:440,y:120,r:22}, walls:[{x:0,y:450,w:380,h:16}], bumpers:[], sand:[], water:[], portals:[{x:100,y:560,r:30,target:{x:440,y:380},color:'#d44ba8'},{x:440,y:380,r:30,target:{x:100,y:560},color:'#d44ba8'}], wind:null, name:'Wormhole' },
+  { w:540,h:900,par:4, ballStart:{x:270,y:820}, hole:{x:270,y:100,r:22}, walls:[{x:100,y:700,w:16,h:140},{x:424,y:700,w:16,h:140},{x:100,y:350,w:240,h:16},{x:200,y:200,w:240,h:16}], bumpers:[], sand:[{x:270,y:580,r:80},{x:150,y:280,r:60},{x:400,y:460,r:50}], water:[], portals:[], wind:null, name:'Dunes' },
+  { w:540,h:900,par:3, ballStart:{x:270,y:800}, hole:{x:270,y:120,r:24}, walls:[], bumpers:[{x:270,y:460,r:32}], sand:[], water:[], portals:[], wind:{fx:0.05,fy:0}, name:'Crosswind' },
+  { w:540,h:900,par:4, ballStart:{x:270,y:800}, hole:{x:270,y:200,r:22}, walls:[], bumpers:[], sand:[], water:[{x:60,y:100,w:130,h:250},{x:350,y:100,w:130,h:250},{x:60,y:380,w:420,h:30}], portals:[], wind:null, name:'Island Green' },
+  { w:540,h:900,par:5, ballStart:{x:270,y:820}, hole:{x:470,y:120,r:22}, walls:[{x:0,y:600,w:380,h:16},{x:200,y:350,w:340,h:16}], bumpers:[{x:130,y:500,r:24},{x:410,y:500,r:24},{x:130,y:220,r:24}], sand:[{x:350,y:700,r:60}], water:[], portals:[{x:60,y:760,r:26,target:{x:60,y:200},color:'#4bdcb5'},{x:60,y:200,r:26,target:{x:60,y:760},color:'#4bdcb5'}], wind:null, name:'Shortcut?' },
+  { w:540,h:900,par:5, ballStart:{x:90,y:820}, hole:{x:450,y:100,r:24}, walls:[{x:200,y:700,w:16,h:140},{x:200,y:400,w:240,h:16}], bumpers:[{x:300,y:580,r:24},{x:100,y:480,r:24},{x:380,y:280,r:24}], sand:[{x:360,y:600,r:60}], water:[{x:220,y:200,w:140,h:100}], portals:[{x:480,y:800,r:26,target:{x:60,y:460},color:'#f5d76e'},{x:60,y:460,r:26,target:{x:480,y:800},color:'#f5d76e'}], wind:{fx:-0.04,fy:0}, name:'The Cauldron' },
+];
+
+// ============== UTIL ==============
+function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+function clampSpeed(o, max){
+  const sp = Math.hypot(o.vx, o.vy);
+  if (sp > max){ o.vx = o.vx/sp*max; o.vy = o.vy/sp*max; }
+}
+function genRoomCode(){
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous chars
+  let s = '';
+  for (let i = 0; i < 4; i++) s += letters[Math.floor(Math.random() * letters.length)];
+  return s;
+}
+
+// ============== ROOM ==============
+class Room {
+  constructor(code, hostId, mode, opts) {
+    this.code = code;
+    this.hostId = hostId;
+    this.mode = mode; // 'match' or 'golf'
+    this.players = new Map(); // id -> player object
+    this.state = 'lobby'; // lobby | playing | finished
+    this.lastActivity = Date.now();
+
+    // Match-specific
+    this.matchOpts = { arena: opts.arena || 'classic', goalsToWin: opts.goalsToWin || 3 };
+    this.scoreRed = 0;
+    this.scoreBlue = 0;
+    this.matchBall = null;
+
+    // Golf-specific
+    this.golfOpts = { courseLength: opts.courseLength || 6 };
+    this.currentHole = 0;
+    this.holeStartTime = 0;
+    this.scorecards = new Map(); // playerId -> [{par, strokes, name}]
+    this.holeCompletePlayers = new Set(); // who's already sunk this hole
+
+    this.matchTime = 0;
+    this.lastTick = Date.now();
+    this.tickInterval = null;
+    this.goalCelebration = 0; // ticks remaining for goal pause
+  }
+
+  addPlayer(id, ws, name) {
+    const teamColor = TEAM_COLORS[this.players.size % TEAM_COLORS.length];
+    const team = this.mode === 'match' ? (this.players.size % 2 === 0 ? 'red' : 'blue') : 'self';
+    const p = {
+      id, ws, name: name || 'Player ' + (this.players.size + 1),
+      team, color: teamColor,
+      x: 0, y: 0, vx: 0, vy: 0, r: PLAYER_R,
+      boost: 100,
+      input: { ax: 0, ay: 0, kicking: false, boosting: false },
+      ball: null, // golf: each player has their own ball
+      strokes: 0,
+      lastKickPos: null,
+      ready: false,
+    };
+    this.players.set(id, p);
+    return p;
+  }
+
+  removePlayer(id) {
+    this.players.delete(id);
+    if (this.players.size === 0) return true; // room empty
+    if (this.hostId === id) {
+      // promote next player as host
+      this.hostId = this.players.keys().next().value;
+    }
+    return false;
+  }
+
+  start() {
+    if (this.state !== 'lobby') return;
+    if (this.players.size < 1) return;
+    this.state = 'playing';
+    if (this.mode === 'match') this.initMatch();
+    else this.initGolfHole();
+    this.lastTick = Date.now();
+    this.tickInterval = setInterval(() => this.tick(), TICK_MS);
+  }
+
+  initMatch() {
+    const W = arenas[this.matchOpts.arena].w;
+    const H = arenas[this.matchOpts.arena].h;
+    let redCount = 0, blueCount = 0;
+    for (const p of this.players.values()) {
+      // re-balance teams
+      if (p.team === 'red') {
+        const slot = redCount++;
+        p.x = W * 0.3 + slot * 50;
+        p.y = H * 0.78;
+      } else {
+        const slot = blueCount++;
+        p.x = W * 0.3 + slot * 50;
+        p.y = H * 0.22;
+      }
+      p.vx = 0; p.vy = 0;
+      p.boost = 100;
+    }
+    this.matchBall = { x: W/2, y: H/2, vx: 0, vy: 0, r: BALL_R };
+    this.scoreRed = 0;
+    this.scoreBlue = 0;
+    this.matchTime = 0;
+    this.goalCelebration = 0;
+  }
+
+  initGolfHole() {
+    const h = courses[this.currentHole];
+    const angleStep = (Math.PI * 2) / Math.max(this.players.size, 1);
+    let i = 0;
+    for (const p of this.players.values()) {
+      // arrange players around the ball start in a circle
+      const ang = i * angleStep;
+      p.x = h.ballStart.x + Math.cos(ang) * 70;
+      p.y = h.ballStart.y + 70 + Math.sin(ang) * 30;
+      p.vx = 0; p.vy = 0;
+      p.boost = 100;
+      // each player gets their own ball, slightly offset
+      p.ball = {
+        x: h.ballStart.x + Math.cos(ang) * 28,
+        y: h.ballStart.y + Math.sin(ang) * 28,
+        vx: 0, vy: 0, r: BALL_R, portalCool: 0,
+      };
+      p.strokes = 0;
+      p.lastKickPos = { x: p.ball.x, y: p.ball.y };
+      i++;
+    }
+    this.holeCompletePlayers.clear();
+    this.holeStartTime = Date.now();
+    this.goalCelebration = 0;
+  }
+
+  setInput(playerId, input) {
+    const p = this.players.get(playerId);
+    if (!p) return;
+    p.input.ax = clamp(Number(input.ax) || 0, -1, 1);
+    p.input.ay = clamp(Number(input.ay) || 0, -1, 1);
+    const m = Math.hypot(p.input.ax, p.input.ay);
+    if (m > 1) { p.input.ax /= m; p.input.ay /= m; }
+    p.input.kicking = !!input.kicking;
+    p.input.boosting = !!input.boosting;
+  }
+
+  tick() {
+    const now = Date.now();
+    this.lastTick = now;
+    this.lastActivity = now;
+
+    if (this.goalCelebration > 0) {
+      this.goalCelebration--;
+      this.broadcastState();
+      return;
+    }
+
+    if (this.mode === 'match') this.tickMatch();
+    else this.tickGolf();
+
+    this.broadcastState();
+
+    // Auto-cleanup empty rooms
+    if (this.players.size === 0) this.stop();
+  }
+
+  // ---------- MATCH MODE ----------
+  tickMatch() {
+    const T = MATCH_TUNING;
+    const arena = arenas[this.matchOpts.arena];
+
+    for (const p of this.players.values()) this.updatePlayer(p, T, arena, null);
+    this.updateMatchBall(T, arena);
+
+    // player-player collisions
+    const arr = [...this.players.values()];
+    for (let i = 0; i < arr.length; i++) {
+      for (let j = i+1; j < arr.length; j++) {
+        this.collideCircles(arr[i], arr[j]);
+      }
+    }
+
+    this.matchTime += 1 / TICK_HZ;
+  }
+
+  updateMatchBall(T, arena) {
+    const ball = this.matchBall;
+    const W = arena.w, H = arena.h, gw = arena.goalW;
+    const gL = (W - gw) / 2, gR = (W + gw) / 2;
+    ball.vx *= T.fb; ball.vy *= T.fb;
+    clampSpeed(ball, T.ballMax);
+    for (let i = 0; i < SUBSTEPS; i++) {
+      ball.x += ball.vx / SUBSTEPS;
+      ball.y += ball.vy / SUBSTEPS;
+      if (ball.x - ball.r < 0) { ball.x = ball.r; ball.vx *= -T.ballBounce; }
+      if (ball.x + ball.r > W) { ball.x = W - ball.r; ball.vx *= -T.ballBounce; }
+      if (arena.hex) this.hexCornerCollide(ball, arena, T.ballBounce);
+      if (ball.y - ball.r < -ball.r) {
+        if (ball.x > gL && ball.x < gR) { this.onMatchGoal('red'); return; }
+        else { ball.y = ball.r; ball.vy *= -T.ballBounce; }
+      }
+      if (ball.y + ball.r > H + ball.r) {
+        if (ball.x > gL && ball.x < gR) { this.onMatchGoal('blue'); return; }
+        else { ball.y = H - ball.r; ball.vy *= -T.ballBounce; }
+      }
+      if (ball.y - ball.r < 0 && (ball.x < gL || ball.x > gR)) { ball.y = ball.r; ball.vy *= -T.ballBounce; }
+      if (ball.y + ball.r > H && (ball.x < gL || ball.x > gR)) { ball.y = H - ball.r; ball.vy *= -T.ballBounce; }
+    }
+  }
+
+  onMatchGoal(scorer) {
+    if (scorer === 'red') this.scoreRed++; else this.scoreBlue++;
+    this.broadcast({ type: 'goal', scorer, scoreRed: this.scoreRed, scoreBlue: this.scoreBlue });
+    this.goalCelebration = TICK_HZ * 2; // 2 seconds pause
+    if (this.scoreRed >= this.matchOpts.goalsToWin || this.scoreBlue >= this.matchOpts.goalsToWin) {
+      this.endMatch();
+    } else {
+      // reset positions after a short delay
+      setTimeout(() => {
+        if (this.state === 'playing') this.initMatch();
+      }, 1800);
+    }
+  }
+
+  endMatch() {
+    this.state = 'finished';
+    this.broadcast({
+      type: 'matchEnd',
+      winner: this.scoreRed > this.scoreBlue ? 'red' : 'blue',
+      scoreRed: this.scoreRed,
+      scoreBlue: this.scoreBlue,
+    });
+    setTimeout(() => {
+      this.state = 'lobby';
+      this.broadcast({ type: 'roomState', state: 'lobby' });
+    }, 4000);
+  }
+
+  // ---------- GOLF MODE ----------
+  tickGolf() {
+    const T = GOLF_TUNING;
+    const h = courses[this.currentHole];
+
+    for (const p of this.players.values()) {
+      if (this.holeCompletePlayers.has(p.id)) continue;
+      this.updatePlayer(p, T, null, h);
+      this.updateGolfBall(p, T, h);
+    }
+
+    // player-player collisions
+    const arr = [...this.players.values()].filter(p => !this.holeCompletePlayers.has(p.id));
+    for (let i = 0; i < arr.length; i++) {
+      for (let j = i+1; j < arr.length; j++) {
+        this.collideCircles(arr[i], arr[j]);
+      }
+    }
+    // ball-ball collisions (the chaos)
+    const balls = arr.map(p => p.ball);
+    for (let i = 0; i < balls.length; i++) {
+      for (let j = i+1; j < balls.length; j++) {
+        this.collideCircles(balls[i], balls[j]);
+      }
+    }
+  }
+
+  updateGolfBall(p, T, h) {
+    const ball = p.ball;
+    if (h.wind) { ball.vx += h.wind.fx; ball.vy += h.wind.fy; }
+    let onSand = false;
+    for (const s of h.sand) if (Math.hypot(ball.x - s.x, ball.y - s.y) < s.r) { onSand = true; break; }
+    ball.vx *= onSand ? 0.93 : T.fb;
+    ball.vy *= onSand ? 0.93 : T.fb;
+    clampSpeed(ball, T.ballMax);
+
+    for (let i = 0; i < SUBSTEPS; i++) {
+      ball.x += ball.vx / SUBSTEPS;
+      ball.y += ball.vy / SUBSTEPS;
+      if (ball.x - ball.r < 0) { ball.x = ball.r; ball.vx *= -T.ballBounce; }
+      if (ball.x + ball.r > h.w) { ball.x = h.w - ball.r; ball.vx *= -T.ballBounce; }
+      if (ball.y - ball.r < 0) { ball.y = ball.r; ball.vy *= -T.ballBounce; }
+      if (ball.y + ball.r > h.h) { ball.y = h.h - ball.r; ball.vy *= -T.ballBounce; }
+      for (const w of h.walls) this.collideRectCircle(ball, w, T.ballBounce);
+      for (const b of h.bumpers) {
+        const dd = Math.hypot(ball.x - b.x, ball.y - b.y);
+        if (dd < ball.r + b.r) {
+          this.collideCircleObstacle(ball, b, 1.1);
+          const nx = (ball.x - b.x) / (dd || 0.001);
+          const ny = (ball.y - b.y) / (dd || 0.001);
+          ball.vx += nx * 1.2; ball.vy += ny * 1.2;
+          clampSpeed(ball, T.ballMax);
+        }
+      }
+    }
+
+    // water = +1 stroke + reset
+    for (const w of h.water) {
+      if (ball.x > w.x && ball.x < w.x + w.w && ball.y > w.y && ball.y < w.y + w.h) {
+        p.strokes++;
+        ball.x = p.lastKickPos.x; ball.y = p.lastKickPos.y;
+        ball.vx = 0; ball.vy = 0;
+        this.broadcast({ type: 'splash', playerId: p.id, name: p.name });
+        return;
+      }
+    }
+
+    // portals
+    if (ball.portalCool > 0) ball.portalCool--;
+    if (ball.portalCool === 0) {
+      for (const portal of h.portals) {
+        if (Math.hypot(ball.x - portal.x, ball.y - portal.y) < portal.r) {
+          ball.x = portal.target.x;
+          ball.y = portal.target.y;
+          ball.portalCool = TICK_HZ; // 1 second cooldown
+          break;
+        }
+      }
+    }
+
+    // cup
+    const dHole = Math.hypot(ball.x - h.hole.x, ball.y - h.hole.y);
+    if (dHole < h.hole.r) {
+      const sp = Math.hypot(ball.vx, ball.vy);
+      if (sp < 4.5) {
+        this.onPlayerHoledOut(p);
+      } else {
+        const nx = (ball.x - h.hole.x) / (dHole || 0.001);
+        const ny = (ball.y - h.hole.y) / (dHole || 0.001);
+        ball.vx += nx * 0.5; ball.vy += ny * 0.5;
+      }
+    }
+  }
+
+  onPlayerHoledOut(p) {
+    if (this.holeCompletePlayers.has(p.id)) return;
+    this.holeCompletePlayers.add(p.id);
+    const h = courses[this.currentHole];
+    const card = this.scorecards.get(p.id) || [];
+    card.push({ par: h.par, strokes: p.strokes, name: h.name });
+    this.scorecards.set(p.id, card);
+
+    this.broadcast({
+      type: 'holed',
+      playerId: p.id,
+      name: p.name,
+      strokes: p.strokes,
+      par: h.par,
+      finishOrder: this.holeCompletePlayers.size,
+    });
+
+    // If everyone done, advance hole
+    if (this.holeCompletePlayers.size === this.players.size) {
+      this.goalCelebration = TICK_HZ * 2; // brief pause
+      setTimeout(() => {
+        if (this.state !== 'playing') return;
+        this.currentHole++;
+        if (this.currentHole >= this.golfOpts.courseLength) {
+          this.endGolf();
+        } else {
+          this.initGolfHole();
+          this.broadcast({ type: 'newHole', hole: this.currentHole, holeData: courses[this.currentHole] });
+        }
+      }, 2200);
+    } else {
+      // Auto-advance after 30s if some players are stuck
+      setTimeout(() => {
+        if (this.state !== 'playing') return;
+        if (this.holeCompletePlayers.size === this.players.size) return;
+        if (Date.now() - this.holeStartTime > 90000) {
+          // give stragglers max-strokes
+          for (const pp of this.players.values()) {
+            if (!this.holeCompletePlayers.has(pp.id)) {
+              pp.strokes = Math.max(pp.strokes, h.par + 4);
+              this.onPlayerHoledOut(pp);
+            }
+          }
+        }
+      }, 30000);
+    }
+  }
+
+  endGolf() {
+    this.state = 'finished';
+    // compile final scores
+    const results = [];
+    for (const p of this.players.values()) {
+      const card = this.scorecards.get(p.id) || [];
+      let total = 0, totalPar = 0;
+      for (const s of card) { total += s.strokes; totalPar += s.par; }
+      results.push({
+        playerId: p.id, name: p.name, color: p.color,
+        total, totalPar, diff: total - totalPar, card,
+      });
+    }
+    results.sort((a, b) => a.total - b.total);
+    this.broadcast({ type: 'golfEnd', results });
+
+    setTimeout(() => {
+      this.state = 'lobby';
+      this.broadcast({ type: 'roomState', state: 'lobby' });
+    }, 6000);
+  }
+
+  // ---------- SHARED PHYSICS ----------
+  updatePlayer(p, T, arena, hole) {
+    const ax = p.input.ax, ay = p.input.ay;
+    const boosting = p.input.boosting && p.boost > 0;
+    const accel = boosting ? T.accelB : T.accel;
+    const max = boosting ? T.maxB : T.max;
+
+    p.vx += ax * accel;
+    p.vy += ay * accel;
+    clampSpeed(p, max);
+    p.vx *= T.fp; p.vy *= T.fp;
+
+    for (let i = 0; i < SUBSTEPS; i++) {
+      p.x += p.vx / SUBSTEPS;
+      p.y += p.vy / SUBSTEPS;
+      // walls
+      if (arena) {
+        const W = arena.w, H = arena.h, gw = arena.goalW;
+        const gL = (W - gw) / 2, gR = (W + gw) / 2;
+        if (p.x - p.r < 0) { p.x = p.r; p.vx *= -T.bounce; }
+        if (p.x + p.r > W) { p.x = W - p.r; p.vx *= -T.bounce; }
+        if (p.y - p.r < 0 && (p.x < gL || p.x > gR)) { p.y = p.r; p.vy *= -T.bounce; }
+        if (p.y + p.r > H && (p.x < gL || p.x > gR)) { p.y = H - p.r; p.vy *= -T.bounce; }
+        if (arena.hex) this.hexCornerCollide(p, arena, T.bounce);
+      } else if (hole) {
+        if (p.x - p.r < 0) { p.x = p.r; p.vx *= -T.bounce; }
+        if (p.x + p.r > hole.w) { p.x = hole.w - p.r; p.vx *= -T.bounce; }
+        if (p.y - p.r < 0) { p.y = p.r; p.vy *= -T.bounce; }
+        if (p.y + p.r > hole.h) { p.y = hole.h - p.r; p.vy *= -T.bounce; }
+        for (const w of hole.walls) this.collideRectCircle(p, w, T.bounce);
+        for (const b of hole.bumpers) this.collideCircleObstacle(p, b, T.bounce);
+      }
+      // player vs ball(s)
+      if (this.mode === 'match') {
+        this.collidePlayerBall(p, this.matchBall, T);
+      } else {
+        // collide with own ball
+        this.collidePlayerBall(p, p.ball, T);
+        // also collide with OTHER players' balls (the fight!)
+        for (const other of this.players.values()) {
+          if (other.id !== p.id && other.ball && !this.holeCompletePlayers.has(other.id)) {
+            this.collidePlayerBall(p, other.ball, T);
+          }
+        }
+      }
+    }
+
+    // boost regen
+    if (p.input.boosting && (ax !== 0 || ay !== 0)) p.boost = Math.max(0, p.boost - 2.4);
+    else p.boost = Math.min(100, p.boost + 0.7);
+
+    // kick
+    if (p.input.kicking) {
+      const target = (this.mode === 'match') ? this.matchBall : p.ball;
+      // for golf, can also kick adjacent balls (own or others)
+      const kickables = (this.mode === 'match') ? [this.matchBall] : (
+        [...this.players.values()].filter(o => o.ball && !this.holeCompletePlayers.has(o.id)).map(o => o.ball)
+      );
+      let kicked = false;
+      for (const b of kickables) {
+        const d = dist(p, b);
+        if (d < p.r + b.r + 12) {
+          const dx = b.x - p.x, dy = b.y - p.y;
+          const dn = Math.hypot(dx, dy) || 1;
+          b.vx += (dx / dn) * T.kick;
+          b.vy += (dy / dn) * T.kick;
+          clampSpeed(b, T.ballMax);
+          // strokes only count for OWN ball in golf
+          if (this.mode === 'golf' && b === p.ball && !kicked) {
+            p.strokes++;
+            p.lastKickPos = { x: b.x, y: b.y };
+          }
+          kicked = true;
+        }
+      }
+    }
+  }
+
+  collidePlayerBall(p, ball, T) {
+    if (!ball) return;
+    const d = dist(p, ball);
+    const minD = p.r + ball.r;
+    if (d < minD) {
+      const dx = ball.x - p.x, dy = ball.y - p.y;
+      const dn = d || 0.001;
+      const nx = dx / dn, ny = dy / dn;
+      const overlap = minD - d;
+      ball.x += nx * overlap; ball.y += ny * overlap;
+      const relVx = ball.vx - p.vx, relVy = ball.vy - p.vy;
+      const dot = relVx * nx + relVy * ny;
+      if (dot < 0) {
+        const restitution = 1.1;
+        ball.vx -= (1 + restitution) * dot * nx;
+        ball.vy -= (1 + restitution) * dot * ny;
+        clampSpeed(ball, T.ballMax);
+      }
+    }
+  }
+
+  collideCircles(a, b) {
+    const d = dist(a, b);
+    const minD = (a.r || 0) + (b.r || 0);
+    if (d < minD) {
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dn = d || 0.001;
+      const nx = dx / dn, ny = dy / dn;
+      const overlap = minD - d;
+      a.x -= nx * overlap / 2; a.y -= ny * overlap / 2;
+      b.x += nx * overlap / 2; b.y += ny * overlap / 2;
+      const va = a.vx * nx + a.vy * ny;
+      const vb = b.vx * nx + b.vy * ny;
+      const diff = vb - va;
+      a.vx += diff * nx; a.vy += diff * ny;
+      b.vx -= diff * nx; b.vy -= diff * ny;
+    }
+  }
+
+  collideRectCircle(c, rect, bounce) {
+    const rx = clamp(c.x, rect.x, rect.x + rect.w);
+    const ry = clamp(c.y, rect.y, rect.y + rect.h);
+    const dx = c.x - rx, dy = c.y - ry;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < c.r * c.r) {
+      const d = Math.sqrt(d2) || 0.001;
+      const nx = dx / d, ny = dy / d;
+      const overlap = c.r - d;
+      c.x += nx * overlap; c.y += ny * overlap;
+      const dot = c.vx * nx + c.vy * ny;
+      if (dot < 0) {
+        c.vx -= (1 + bounce) * dot * nx;
+        c.vy -= (1 + bounce) * dot * ny;
+      }
+    }
+  }
+  collideCircleObstacle(c, obs, bounce) {
+    const dx = c.x - obs.x, dy = c.y - obs.y;
+    const d = Math.hypot(dx, dy);
+    const minD = c.r + obs.r;
+    if (d < minD) {
+      const dn = d || 0.001;
+      const nx = dx / dn, ny = dy / dn;
+      const overlap = minD - d;
+      c.x += nx * overlap; c.y += ny * overlap;
+      const dot = c.vx * nx + c.vy * ny;
+      if (dot < 0) {
+        c.vx -= (1 + bounce) * dot * nx;
+        c.vy -= (1 + bounce) * dot * ny;
+      }
+    }
+  }
+  hexCornerCollide(o, arena, bounce) {
+    const W = arena.w, H = arena.h, cut = 90, r = o.r;
+    const corners = [
+      { fn:(x,y)=>x+y-cut,         nx:-1/Math.SQRT2, ny:-1/Math.SQRT2 },
+      { fn:(x,y)=>(W-x)+y-cut,     nx: 1/Math.SQRT2, ny:-1/Math.SQRT2 },
+      { fn:(x,y)=>x+(H-y)-cut,     nx:-1/Math.SQRT2, ny: 1/Math.SQRT2 },
+      { fn:(x,y)=>(W-x)+(H-y)-cut, nx: 1/Math.SQRT2, ny: 1/Math.SQRT2 },
+    ];
+    for (const c of corners) {
+      const v = c.fn(o.x, o.y);
+      if (v < r) {
+        const push = r - v;
+        o.x += c.nx * push; o.y += c.ny * push;
+        const dot = o.vx * c.nx + o.vy * c.ny;
+        if (dot < 0) {
+          o.vx -= (1 + bounce) * dot * c.nx;
+          o.vy -= (1 + bounce) * dot * c.ny;
+        }
+      }
+    }
+  }
+
+  // ---------- NETWORKING ----------
+  broadcast(msg) {
+    const data = JSON.stringify(msg);
+    for (const p of this.players.values()) {
+      try { p.ws.send(data); } catch (e) {}
+    }
+  }
+
+  broadcastState() {
+    const players = [];
+    for (const p of this.players.values()) {
+      const o = {
+        id: p.id, name: p.name, color: p.color, team: p.team,
+        x: Math.round(p.x * 10) / 10,
+        y: Math.round(p.y * 10) / 10,
+        boost: Math.round(p.boost),
+        boosting: p.input.boosting,
+        strokes: p.strokes,
+        holed: this.holeCompletePlayers.has(p.id),
+      };
+      if (this.mode === 'golf' && p.ball) {
+        o.ball = {
+          x: Math.round(p.ball.x * 10) / 10,
+          y: Math.round(p.ball.y * 10) / 10,
+        };
+      }
+      players.push(o);
+    }
+    const msg = {
+      type: 'state',
+      mode: this.mode,
+      state: this.state,
+      players,
+      goalCelebration: this.goalCelebration > 0,
+    };
+    if (this.mode === 'match') {
+      msg.ball = {
+        x: Math.round(this.matchBall.x * 10) / 10,
+        y: Math.round(this.matchBall.y * 10) / 10,
+      };
+      msg.scoreRed = this.scoreRed;
+      msg.scoreBlue = this.scoreBlue;
+      msg.matchTime = Math.round(this.matchTime);
+      msg.arena = this.matchOpts.arena;
+      msg.goalsToWin = this.matchOpts.goalsToWin;
+    } else {
+      msg.currentHole = this.currentHole;
+      msg.totalHoles = this.golfOpts.courseLength;
+    }
+    this.broadcast(msg);
+  }
+
+  sendLobbyState() {
+    const playerList = [];
+    for (const p of this.players.values()) {
+      playerList.push({ id: p.id, name: p.name, color: p.color, isHost: p.id === this.hostId });
+    }
+    this.broadcast({
+      type: 'lobby',
+      code: this.code,
+      mode: this.mode,
+      players: playerList,
+      hostId: this.hostId,
+      matchOpts: this.matchOpts,
+      golfOpts: this.golfOpts,
+    });
+  }
+
+  stop() {
+    if (this.tickInterval) { clearInterval(this.tickInterval); this.tickInterval = null; }
+    this.state = 'finished';
+  }
+}
+
+// ============== ROOM REGISTRY ==============
+const rooms = new Map();
+const playerRooms = new Map(); // playerId -> roomCode
+
+function createRoom(hostId, mode, opts) {
+  let code;
+  do { code = genRoomCode(); } while (rooms.has(code));
+  const room = new Room(code, hostId, mode, opts);
+  rooms.set(code, room);
+  return room;
+}
+
+// Cleanup empty/dead rooms periodically
+setInterval(() => {
+  for (const [code, room] of rooms) {
+    if (room.players.size === 0 || (Date.now() - room.lastActivity) > 30 * 60 * 1000) {
+      room.stop();
+      rooms.delete(code);
+    }
+  }
+}, 60000);
+
+// ============== HTTP SERVER (static files) ==============
+const PUBLIC = path.join(__dirname, 'public');
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.ico': 'image/x-icon',
+  '.json': 'application/json',
+};
+
+const httpServer = http.createServer((req, res) => {
+  const url = new URL(req.url, 'http://x');
+  let p = url.pathname === '/' ? '/index.html' : url.pathname;
+  // basic safety
+  if (p.includes('..')) { res.writeHead(400); return res.end(); }
+  const filePath = path.join(PUBLIC, p);
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      res.writeHead(404); res.end('Not found');
+    } else {
+      const ext = path.extname(filePath).toLowerCase();
+      res.writeHead(200, {
+        'Content-Type': MIME[ext] || 'application/octet-stream',
+        'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=300',
+      });
+      res.end(data);
+    }
+  });
+});
+
+// ============== WEBSOCKET SERVER ==============
+const wss = new WebSocketServer({ server: httpServer });
+let nextPlayerId = 1;
+
+wss.on('connection', (ws) => {
+  const playerId = String(nextPlayerId++);
+  let currentRoom = null;
+  let alive = true;
+
+  ws.on('pong', () => { alive = true; });
+  const pingInterval = setInterval(() => {
+    if (!alive) { try { ws.terminate(); } catch(e){} return; }
+    alive = false;
+    try { ws.ping(); } catch(e){}
+  }, 30000);
+
+  ws.send(JSON.stringify({ type: 'welcome', playerId }));
+
+  ws.on('message', (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw); } catch (e) { return; }
+
+    switch (msg.type) {
+      case 'createRoom': {
+        if (currentRoom) leaveRoom();
+        const room = createRoom(playerId, msg.mode || 'match', msg.opts || {});
+        room.addPlayer(playerId, ws, msg.name);
+        playerRooms.set(playerId, room.code);
+        currentRoom = room;
+        ws.send(JSON.stringify({ type: 'roomCreated', code: room.code }));
+        room.sendLobbyState();
+        break;
+      }
+      case 'joinRoom': {
+        if (currentRoom) leaveRoom();
+        const code = (msg.code || '').toUpperCase();
+        const room = rooms.get(code);
+        if (!room) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
+          break;
+        }
+        if (room.state !== 'lobby') {
+          ws.send(JSON.stringify({ type: 'error', message: 'Game already in progress' }));
+          break;
+        }
+        if (room.players.size >= 6) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Room is full' }));
+          break;
+        }
+        room.addPlayer(playerId, ws, msg.name);
+        playerRooms.set(playerId, room.code);
+        currentRoom = room;
+        ws.send(JSON.stringify({ type: 'roomJoined', code: room.code }));
+        room.sendLobbyState();
+        break;
+      }
+      case 'updateOpts': {
+        if (!currentRoom || currentRoom.hostId !== playerId) break;
+        if (currentRoom.mode === 'match' && msg.matchOpts) {
+          if (msg.matchOpts.arena && arenas[msg.matchOpts.arena]) currentRoom.matchOpts.arena = msg.matchOpts.arena;
+          if (msg.matchOpts.goalsToWin) currentRoom.matchOpts.goalsToWin = clamp(parseInt(msg.matchOpts.goalsToWin), 1, 20);
+        }
+        if (currentRoom.mode === 'golf' && msg.golfOpts) {
+          if (msg.golfOpts.courseLength) currentRoom.golfOpts.courseLength = clamp(parseInt(msg.golfOpts.courseLength), 1, courses.length);
+        }
+        currentRoom.sendLobbyState();
+        break;
+      }
+      case 'startGame': {
+        if (!currentRoom || currentRoom.hostId !== playerId) break;
+        currentRoom.start();
+        currentRoom.broadcast({ type: 'gameStart', mode: currentRoom.mode });
+        if (currentRoom.mode === 'golf') {
+          currentRoom.broadcast({ type: 'newHole', hole: 0, holeData: courses[0] });
+        }
+        break;
+      }
+      case 'input': {
+        if (!currentRoom || currentRoom.state !== 'playing') break;
+        currentRoom.setInput(playerId, msg.input || {});
+        break;
+      }
+      case 'leaveRoom': {
+        leaveRoom();
+        break;
+      }
+      case 'chat': {
+        if (!currentRoom) break;
+        const text = String(msg.text || '').slice(0, 200);
+        if (!text) break;
+        const p = currentRoom.players.get(playerId);
+        if (!p) break;
+        currentRoom.broadcast({ type: 'chat', name: p.name, color: p.color, text });
+        break;
+      }
+    }
+  });
+
+  function leaveRoom() {
+    if (!currentRoom) return;
+    const empty = currentRoom.removePlayer(playerId);
+    if (empty) {
+      currentRoom.stop();
+      rooms.delete(currentRoom.code);
+    } else {
+      currentRoom.sendLobbyState();
+    }
+    playerRooms.delete(playerId);
+    currentRoom = null;
+  }
+
+  ws.on('close', () => {
+    clearInterval(pingInterval);
+    leaveRoom();
+  });
+  ws.on('error', () => {});
+});
+
+httpServer.listen(PORT, () => {
+  console.log(`Hexball server listening on :${PORT}`);
+});
