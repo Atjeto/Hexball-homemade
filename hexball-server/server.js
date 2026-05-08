@@ -1117,18 +1117,30 @@ class Room {
       }
     }
   }
+  // Hex arenas have a triangular cutout in each corner along the line
+  // (e.g. x + y = cut for the top-left). The signed perpendicular distance
+  // from a circle center to that line is (x + y - cut) / √2; positive = inside
+  // the playable field, negative = inside the forbidden cutout.
+  // We push the circle along the inward normal until its perpendicular
+  // distance is at least r, then reflect velocity if it's heading into the
+  // wall. Normals point INTO THE FIELD (away from the cutout corner).
   hexCornerCollide(o, arena, bounce) {
     const W = arena.w, H = arena.h, cut = 90, r = o.r;
+    const SQ2 = Math.SQRT2;
     const corners = [
-      { fn:(x,y)=>x+y-cut,         nx:-1/Math.SQRT2, ny:-1/Math.SQRT2 },
-      { fn:(x,y)=>(W-x)+y-cut,     nx: 1/Math.SQRT2, ny:-1/Math.SQRT2 },
-      { fn:(x,y)=>x+(H-y)-cut,     nx:-1/Math.SQRT2, ny: 1/Math.SQRT2 },
-      { fn:(x,y)=>(W-x)+(H-y)-cut, nx: 1/Math.SQRT2, ny: 1/Math.SQRT2 },
+      // Top-left: cutout where x + y < cut. Inward normal = (+, +).
+      { d: (x,y) => (x + y - cut) / SQ2,           nx:  1/SQ2, ny:  1/SQ2 },
+      // Top-right: cutout where (W-x) + y < cut. Inward normal = (-, +).
+      { d: (x,y) => ((W-x) + y - cut) / SQ2,       nx: -1/SQ2, ny:  1/SQ2 },
+      // Bottom-left: cutout where x + (H-y) < cut. Inward normal = (+, -).
+      { d: (x,y) => (x + (H-y) - cut) / SQ2,       nx:  1/SQ2, ny: -1/SQ2 },
+      // Bottom-right: cutout where (W-x) + (H-y) < cut. Inward normal = (-, -).
+      { d: (x,y) => ((W-x) + (H-y) - cut) / SQ2,   nx: -1/SQ2, ny: -1/SQ2 },
     ];
     for (const c of corners) {
-      const v = c.fn(o.x, o.y);
-      if (v < r) {
-        const push = r - v;
+      const dist = c.d(o.x, o.y);
+      if (dist < r) {
+        const push = r - dist;
         o.x += c.nx * push; o.y += c.ny * push;
         const dot = o.vx * c.nx + o.vy * c.ny;
         if (dot < 0) {
