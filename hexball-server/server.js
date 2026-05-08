@@ -33,11 +33,13 @@ const GOLF_TUNING = {
 const TEAM_COLORS = ['#e54b4b', '#4b8bf5', '#5ec678', '#d44ba8', '#f5a623', '#7e57c2'];
 
 // ============== ARENAS ==============
+// Landscape orientation: wide field, goals on LEFT (red defends left, blue defends right)
+// goalH is the vertical span of the goal opening on the side wall.
 const arenas = {
-  classic: { w: 540, h: 900, goalW: 160 },
-  big:     { w: 600, h: 1100, goalW: 180 },
-  tight:   { w: 480, h: 720, goalW: 140 },
-  hex:     { w: 540, h: 900, goalW: 160, hex: true },
+  classic: { w: 900, h: 540, goalH: 200 },
+  big:     { w: 1100, h: 600, goalH: 220 },
+  tight:   { w: 720, h: 480, goalH: 170 },
+  hex:     { w: 900, h: 540, goalH: 200, hex: true },
 };
 
 // ============== GOLF COURSES ==============
@@ -182,60 +184,111 @@ class Room {
     return true;
   }
 
-  // Simple steering AI driven each tick; sets bot.input fields, server then runs
-  // updatePlayer with that input as if it came from a real client.
+  // Role-based bot AI for landscape field.
+  //   * Each bot is assigned a stable role (striker / mid / defender) based on
+  //     a hash of its id, so multiple bots on the same team SPREAD across the
+  //     field rather than clumping on the ball.
+  //   * Only the bot closest to the ball actively chases — others "hold position"
+  //     at their lane (assigned y-band) on a depth (x-band) defined by their role.
+  //   * If the ball reaches a defender's third, they switch to active defense.
   tickBots() {
     if (this.mode !== 'match' || !this.matchBall) return;
     const arena = arenas[this.matchOpts.arena];
     const W = arena.w, H = arena.h;
     const ball = this.matchBall;
     const diff = this.matchOpts.botDifficulty || 'normal';
-    // Difficulty profile:
-    //   reactionSkip — fraction of ticks the bot keeps last input (slower reaction)
-    //   leadFactor   — how much to anticipate ball.vx/.vy (predictive vs reactive)
-    //   jitterAmp    — random wobble added to steering
-    //   kickRange    — distance at which they hold KICK
-    //   boostThresh  — boost only if target distance > this
     const PROF = {
-      easy:   { reactionSkip: 0.45, leadFactor: 0,    jitterAmp: 0.30, kickRange: 36, boostThresh: 320 },
-      normal: { reactionSkip: 0.10, leadFactor: 4,    jitterAmp: 0.15, kickRange: 42, boostThresh: 220 },
-      hard:   { reactionSkip: 0.00, leadFactor: 9,    jitterAmp: 0.05, kickRange: 50, boostThresh: 140 },
+      easy:   { reactionSkip: 0.45, leadFactor: 0,  jitterAmp: 0.30, kickRange: 36, boostThresh: 320 },
+      normal: { reactionSkip: 0.10, leadFactor: 4,  jitterAmp: 0.15, kickRange: 42, boostThresh: 220 },
+      hard:   { reactionSkip: 0.00, leadFactor: 9,  jitterAmp: 0.05, kickRange: 50, boostThresh: 140 },
     }[diff] || { reactionSkip: 0.10, leadFactor: 4, jitterAmp: 0.15, kickRange: 42, boostThresh: 220 };
 
+    // Group bots by team (ordered by id so role assignment is stable across ticks).
+    const teamGroups = { red: [], blue: [] };
     for (const p of this.players.values()) {
-      if (!p.isBot) continue;
-      if (Math.random() < PROF.reactionSkip) continue; // keep last frame's input
+      if (p.isBot && (p.team === 'red' || p.team === 'blue')) teamGroups[p.team].push(p);
+    }
+    teamGroups.red.sort((a, b) => a.id.localeCompare(b.id));
+    teamGroups.blue.sort((a, b) => a.id.localeCompare(b.id));
 
-      const targetGoalY = p.team === 'red' ? 0 : H;
-      const ourGoalY = p.team === 'red' ? H : 0;
-      // Predict ball position a few ticks ahead based on its velocity.
-      const predX = ball.x + (ball.vx || 0) * PROF.leadFactor;
-      const predY = ball.y + (ball.vy || 0) * PROF.leadFactor;
-      const dxBall = predX - p.x, dyBall = predY - p.y;
-      const dBall = Math.hypot(dxBall, dyBall) || 1;
-      let tx, ty;
-      const onOurHalf = (p.team === 'red') ? ball.y > H * 0.5 : ball.y < H * 0.5;
-      const ballHeadingHome = (p.team === 'red' ? ball.vy > 0.5 : ball.vy < -0.5);
-      if (onOurHalf && ballHeadingHome && dBall > 60) {
-        tx = ball.x + (ourGoalY - ball.y) * 0.05;
-        ty = ball.y + Math.sign(ourGoalY - ball.y) * 50;
-      } else if (dBall < 80) {
-        const sign = Math.sign(ball.y - targetGoalY) || 1;
-        tx = predX;
-        ty = predY + sign * 24;
-      } else {
-        tx = predX; ty = predY;
+    for (const team of ['red', 'blue']) {
+      const mates = teamGroups[team];
+      if (!mates.length) continue;
+      // Identify the mate physically closest to the ball — they're the chaser.
+      let chaserIdx = 0, chaserDist = Infinity;
+      for (let i = 0; i < mates.length; i++) {
+        const m = mates[i];
+        const d = Math.hypot(ball.x - m.x, ball.y - m.y);
+        if (d < chaserDist) { chaserDist = d; chaserIdx = i; }
       }
-      const dx = tx - p.x, dy = ty - p.y;
-      const d = Math.hypot(dx, dy) || 1;
-      const jitter = Math.sin((Date.now() / 800) + p.x * 0.01) * PROF.jitterAmp;
-      p.input.ax = clamp(dx / d + jitter, -1, 1);
-      p.input.ay = clamp(dy / d, -1, 1);
-      p.input.kicking = dBall < PROF.kickRange;
-      p.input.boosting = (d > PROF.boostThresh && p.boost > 35);
-      if (Math.abs(p.y - ourGoalY) < 60 && Math.abs(ball.y - ourGoalY) > 200) {
-        p.input.ay = (ourGoalY === 0) ? 0.5 : -0.5;
-      }
+      // Lane assignment: spread along the y axis (top → bottom slots).
+      // For 1 mate → centered. 2 → 0.33 / 0.66. 3 → 0.25 / 0.5 / 0.75. 4 → 0.2 / 0.4 / 0.6 / 0.8.
+      const N = mates.length;
+      mates.forEach((p, i) => {
+        const laneFrac = N === 1 ? 0.5 : (i + 0.5) / N;
+        p._botLaneY = H * (0.20 + 0.60 * laneFrac); // band 20%–80% of arena height
+      });
+      // Role by index: the slot closest to median is the "mid" / striker; outer slots are defenders.
+      // For simplicity: front half = attackers (closer to opp goal), back half = defenders.
+      mates.forEach((p, i) => {
+        const role = (i < N / 2) ? 'def' : 'atk'; // arbitrary stable split (id-sorted)
+        p._botRole = role;
+      });
+
+      // Each bot's HOME x-position depends on team + role.
+      // Red defends LEFT (x≈0): defenders sit at x≈W*0.18, attackers at x≈W*0.45.
+      // Blue defends RIGHT (x≈W): defenders sit at x≈W*0.82, attackers at x≈W*0.55.
+      const homeXDef = team === 'red' ? W * 0.18 : W * 0.82;
+      const homeXAtk = team === 'red' ? W * 0.45 : W * 0.55;
+
+      mates.forEach((p, i) => {
+        if (Math.random() < PROF.reactionSkip) return;
+        const isChaser = (i === chaserIdx);
+
+        const predX = ball.x + (ball.vx || 0) * PROF.leadFactor;
+        const predY = ball.y + (ball.vy || 0) * PROF.leadFactor;
+        const dBall = Math.hypot(ball.x - p.x, ball.y - p.y) || 1;
+
+        // Defender takes over if the ball is in our defensive third.
+        const inOurThird = team === 'red' ? ball.x < W * 0.33 : ball.x > W * 0.67;
+        const role = p._botRole;
+        const homeX = (role === 'def' ? homeXDef : homeXAtk);
+        const homeY = p._botLaneY;
+
+        let tx, ty;
+        if (isChaser || (role === 'def' && inOurThird) || dBall < 90) {
+          // Active engagement — try to hit ball toward opponent goal.
+          // Stand on the side of the ball OPPOSITE the target goal so we push it forward.
+          const targetGoalX = team === 'red' ? W : 0;
+          const sideOffset = team === 'red' ? -28 : 28; // stand a bit "behind" the ball
+          if (dBall < 70) {
+            tx = predX + sideOffset;
+            ty = predY + Math.sign(ball.y - H * 0.5) * 16;
+          } else {
+            // Approach: head toward predicted ball with slight angle to push it goalward.
+            tx = predX;
+            ty = predY;
+          }
+        } else {
+          // Hold lane: drift toward home (homeX, homeY), with mild ball tracking on the y-axis only.
+          // This keeps mates SPREAD instead of all converging on the ball.
+          const ballPullY = clamp((ball.y - homeY) * 0.35, -80, 80);
+          tx = homeX;
+          ty = homeY + ballPullY;
+        }
+
+        // Steering toward (tx, ty)
+        const dx = tx - p.x, dy = ty - p.y;
+        const d = Math.hypot(dx, dy) || 1;
+        const jitter = Math.sin((Date.now() / 800) + p.x * 0.01 + i) * PROF.jitterAmp;
+        p.input.ax = clamp(dx / d + jitter, -1, 1);
+        p.input.ay = clamp(dy / d, -1, 1);
+        // Kick when actually adjacent to ball
+        p.input.kicking = dBall < PROF.kickRange;
+        // Boost only when chasing or sprinting back to position
+        p.input.boosting = (isChaser && d > PROF.boostThresh && p.boost > 35) ||
+                           (!isChaser && d > 280 && p.boost > 50);
+      });
     }
   }
 
@@ -288,6 +341,8 @@ class Room {
   }
 
   // Reset positions only (used after goals) so scores persist.
+  // Landscape layout: red defends LEFT goal, blue defends RIGHT goal.
+  // Players spawn vertically staggered on their own half.
   resetPositions() {
     const W = arenas[this.matchOpts.arena].w;
     const H = arenas[this.matchOpts.arena].h;
@@ -295,12 +350,12 @@ class Room {
     for (const p of this.players.values()) {
       if (p.team === 'red') {
         const slot = redCount++;
-        p.x = W * 0.5 + (slot - 0.5) * 70;
-        p.y = H * 0.78;
+        p.x = W * 0.22;
+        p.y = H * 0.5 + (slot - 0.5) * 70;
       } else {
         const slot = blueCount++;
-        p.x = W * 0.5 + (slot - 0.5) * 70;
-        p.y = H * 0.22;
+        p.x = W * 0.78;
+        p.y = H * 0.5 + (slot - 0.5) * 70;
       }
       p.vx = 0; p.vy = 0;
       p.boost = 100;
@@ -402,28 +457,36 @@ class Room {
     }
   }
 
+  // Landscape ball physics:
+  //   Left wall = red goal opening (vertical span gT..gB) → blue scores when ball exits left
+  //   Right wall = blue goal opening → red scores when ball exits right
+  //   Top/bottom walls always bounce.
   updateMatchBall(T, arena) {
     const ball = this.matchBall;
-    const W = arena.w, H = arena.h, gw = arena.goalW;
-    const gL = (W - gw) / 2, gR = (W + gw) / 2;
+    const W = arena.w, H = arena.h, gh = arena.goalH;
+    const gT = (H - gh) / 2, gB = (H + gh) / 2;
     ball.vx *= T.fb; ball.vy *= T.fb;
     clampSpeed(ball, T.ballMax);
     for (let i = 0; i < SUBSTEPS; i++) {
       ball.x += ball.vx / SUBSTEPS;
       ball.y += ball.vy / SUBSTEPS;
-      if (ball.x - ball.r < 0) { ball.x = ball.r; ball.vx *= -T.ballBounce; }
-      if (ball.x + ball.r > W) { ball.x = W - ball.r; ball.vx *= -T.ballBounce; }
+      // Top/bottom walls
+      if (ball.y - ball.r < 0) { ball.y = ball.r; ball.vy *= -T.ballBounce; }
+      if (ball.y + ball.r > H) { ball.y = H - ball.r; ball.vy *= -T.ballBounce; }
       if (arena.hex) this.hexCornerCollide(ball, arena, T.ballBounce);
-      if (ball.y - ball.r < -ball.r) {
-        if (ball.x > gL && ball.x < gR) { this.onMatchGoal('red'); return; }
-        else { ball.y = ball.r; ball.vy *= -T.ballBounce; }
+      // Left wall (red goal opening)
+      if (ball.x - ball.r < -ball.r) {
+        if (ball.y > gT && ball.y < gB) { this.onMatchGoal('blue'); return; }
+        else { ball.x = ball.r; ball.vx *= -T.ballBounce; }
       }
-      if (ball.y + ball.r > H + ball.r) {
-        if (ball.x > gL && ball.x < gR) { this.onMatchGoal('blue'); return; }
-        else { ball.y = H - ball.r; ball.vy *= -T.ballBounce; }
+      // Right wall (blue goal opening)
+      if (ball.x + ball.r > W + ball.r) {
+        if (ball.y > gT && ball.y < gB) { this.onMatchGoal('red'); return; }
+        else { ball.x = W - ball.r; ball.vx *= -T.ballBounce; }
       }
-      if (ball.y - ball.r < 0 && (ball.x < gL || ball.x > gR)) { ball.y = ball.r; ball.vy *= -T.ballBounce; }
-      if (ball.y + ball.r > H && (ball.x < gL || ball.x > gR)) { ball.y = H - ball.r; ball.vy *= -T.ballBounce; }
+      // Solid wall outside goal-mouth y-range
+      if (ball.x - ball.r < 0 && (ball.y < gT || ball.y > gB)) { ball.x = ball.r; ball.vx *= -T.ballBounce; }
+      if (ball.x + ball.r > W && (ball.y < gT || ball.y > gB)) { ball.x = W - ball.r; ball.vx *= -T.ballBounce; }
     }
   }
 
@@ -691,14 +754,14 @@ class Room {
     for (let i = 0; i < SUBSTEPS; i++) {
       p.x += p.vx / SUBSTEPS;
       p.y += p.vy / SUBSTEPS;
-      // walls
+      // walls (landscape: goals on LEFT and RIGHT)
       if (arena) {
-        const W = arena.w, H = arena.h, gw = arena.goalW;
-        const gL = (W - gw) / 2, gR = (W + gw) / 2;
-        if (p.x - p.r < 0) { p.x = p.r; p.vx *= -T.bounce; }
-        if (p.x + p.r > W) { p.x = W - p.r; p.vx *= -T.bounce; }
-        if (p.y - p.r < 0 && (p.x < gL || p.x > gR)) { p.y = p.r; p.vy *= -T.bounce; }
-        if (p.y + p.r > H && (p.x < gL || p.x > gR)) { p.y = H - p.r; p.vy *= -T.bounce; }
+        const W = arena.w, H = arena.h, gh = arena.goalH;
+        const gT = (H - gh) / 2, gB = (H + gh) / 2;
+        if (p.y - p.r < 0) { p.y = p.r; p.vy *= -T.bounce; }
+        if (p.y + p.r > H) { p.y = H - p.r; p.vy *= -T.bounce; }
+        if (p.x - p.r < 0 && (p.y < gT || p.y > gB)) { p.x = p.r; p.vx *= -T.bounce; }
+        if (p.x + p.r > W && (p.y < gT || p.y > gB)) { p.x = W - p.r; p.vx *= -T.bounce; }
         if (arena.hex) this.hexCornerCollide(p, arena, T.bounce);
       } else if (hole) {
         if (p.x - p.r < 0) { p.x = p.r; p.vx *= -T.bounce; }

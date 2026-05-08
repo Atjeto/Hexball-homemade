@@ -1433,10 +1433,10 @@ let scale = 1, displayW = 0, displayH = 0;
 let arenaDisplayW = 540, arenaDisplayH = 900;
 
 const arenas = {
-  classic: { w: 540, h: 900, goalW: 160 },
-  big:     { w: 600, h: 1100, goalW: 180 },
-  tight:   { w: 480, h: 720, goalW: 140 },
-  hex:     { w: 540, h: 900, goalW: 160, hex: true },
+  classic: { w: 900, h: 540, goalH: 200 },
+  big:     { w: 1100, h: 600, goalH: 220 },
+  tight:   { w: 720, h: 480, goalH: 170 },
+  hex:     { w: 900, h: 540, goalH: 200, hex: true },
 };
 
 function fitCanvas(w, h) {
@@ -1804,18 +1804,20 @@ function draw() {
 
 function drawMatch() {
   const a = arenas[localState.game.arena] || arenas.classic;
-  const W = a.w, H = a.h, gw = a.goalW;
-  const gL = (W - gw) / 2, gR = (W + gw) / 2;
+  const W = a.w, H = a.h, gh = a.goalH;
+  const gT = (H - gh) / 2, gB = (H + gh) / 2;
   // canvas is sized exactly to the arena's display dims (no letterboxing offset needed)
   const sx = displayW / W;
   const t = getLerpT();
   ctx.save();
   ctx.scale(sx, sx);
 
+  // Vertical stripes (landscape look)
   ctx.fillStyle = theme.grass; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = theme.grassStripe;
-  for (let i = 0; i < H; i += 60) if ((i/60)%2 === 0) ctx.fillRect(0, i, W, 60);
+  for (let i = 0; i < W; i += 60) if ((i/60)%2 === 0) ctx.fillRect(i, 0, 60, H);
 
+  // Hex corner cuts (mirrored on landscape)
   if (a.hex) {
     ctx.fillStyle = theme.bg;
     const cut = 90;
@@ -1825,39 +1827,41 @@ function drawMatch() {
     ctx.beginPath(); ctx.moveTo(W,H); ctx.lineTo(W-cut,H); ctx.lineTo(W,H-cut); ctx.closePath(); ctx.fill();
   }
 
+  // Border + halfway line (vertical) + center circle
   ctx.strokeStyle = theme.fieldLine; ctx.lineWidth = 2;
   ctx.strokeRect(2, 2, W-4, H-4);
-  ctx.beginPath(); ctx.moveTo(2, H/2); ctx.lineTo(W-2, H/2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W/2, 2); ctx.lineTo(W/2, H-2); ctx.stroke();
   ctx.beginPath(); ctx.arc(W/2, H/2, 70, 0, Math.PI*2); ctx.stroke();
   ctx.fillStyle = theme.fieldLine;
   ctx.beginPath(); ctx.arc(W/2, H/2, 4, 0, Math.PI*2); ctx.fill();
 
-  // Penalty arcs (Haxball-style accent)
-  const arcR = Math.min(120, gw * 0.9);
-  ctx.beginPath(); ctx.arc(W/2, 0, arcR, 0, Math.PI); ctx.stroke();
-  ctx.beginPath(); ctx.arc(W/2, H, arcR, Math.PI, Math.PI*2); ctx.stroke();
+  // Penalty arcs at each goal (haxball look) — semicircles facing into the field
+  const arcR = Math.min(120, gh * 0.9);
+  ctx.beginPath(); ctx.arc(0, H/2, arcR, -Math.PI/2, Math.PI/2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(W, H/2, arcR, Math.PI/2, -Math.PI/2); ctx.stroke();
 
-  // goals
-  ctx.fillStyle = hexA(theme.blue, 0.18);
-  ctx.fillRect(gL, -20, gw, 22);
-  ctx.strokeStyle = theme.blue; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(gL, 0); ctx.lineTo(gR, 0); ctx.stroke();
+  // Goals: red defends LEFT, blue defends RIGHT.
+  // Highlight rectangle behind each goal-mouth.
   ctx.fillStyle = hexA(theme.red, 0.18);
-  ctx.fillRect(gL, H-2, gw, 22);
-  ctx.strokeStyle = theme.red;
-  ctx.beginPath(); ctx.moveTo(gL, H); ctx.lineTo(gR, H); ctx.stroke();
+  ctx.fillRect(-20, gT, 22, gh);
+  ctx.strokeStyle = theme.red; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(0, gT); ctx.lineTo(0, gB); ctx.stroke();
+  ctx.fillStyle = hexA(theme.blue, 0.18);
+  ctx.fillRect(W-2, gT, 22, gh);
+  ctx.strokeStyle = theme.blue;
+  ctx.beginPath(); ctx.moveTo(W, gT); ctx.lineTo(W, gB); ctx.stroke();
 
-  // posts
+  // Posts
   ctx.fillStyle = theme.fieldLine;
-  [[gL,0],[gR,0],[gL,H],[gR,H]].forEach(([x,y]) => { ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI*2); ctx.fill(); });
+  [[0,gT],[0,gB],[W,gT],[W,gB]].forEach(([x,y]) => { ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI*2); ctx.fill(); });
 
-  // Own-team strip on side of field (you attack the OPPOSITE goal)
+  // Own-team strip on top/bottom edges (subtle reminder of your color)
   const me = (localState.game.players || []).find(p => p.id === localState.playerId);
   if (me) {
     const stripColor = me.team === 'red' ? theme.red : theme.blue;
     ctx.fillStyle = hexA(stripColor, 0.16);
-    ctx.fillRect(0, 0, 6, H);
-    ctx.fillRect(W-6, 0, 6, H);
+    ctx.fillRect(0, 0, W, 6);
+    ctx.fillRect(0, H-6, W, 6);
   }
 
   // Ball trail (rendered before ball)
