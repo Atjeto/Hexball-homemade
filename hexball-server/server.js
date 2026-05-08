@@ -16,9 +16,13 @@ const BALL_R = 14;
 const SUBSTEPS = 6;
 
 const MATCH_TUNING = {
-  fp: 0.90, fb: 0.992,           // tighter friction = less drift
-  accel: 0.70, accelB: 1.15,     // bumped to compensate for higher friction
-  max: 4.95, maxB: 8.0,
+  // Movement tuned for "less wind-up" feel: faster acceleration ramp so the
+  // player reaches top speed in ~3-4 ticks (~120 ms) and a slightly tighter
+  // friction so they stop quickly. Top speed nudged down a hair to keep the
+  // overall pace similar without the slippery glide.
+  fp: 0.87, fb: 0.992,
+  accel: 0.82, accelB: 1.30,
+  max: 4.7, maxB: 7.5,
   kick: 7.0, bounce: 0.7,
   ballBounce: 0.85, ballMax: 11.5,
 };
