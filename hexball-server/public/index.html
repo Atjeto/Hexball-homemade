@@ -230,12 +230,13 @@
   }
 
   /* ---------- GAME BODY (canvas + controls) ---------- */
-  /* Default: portrait phone — controls in a strip below the canvas. */
+  /* Default: portrait phone — controls in a strip below the canvas.
+     Move pad gets the larger share since drag precision matters more. */
   .game-body {
     flex: 1 1 auto; min-height: 0;
     display: grid;
     grid-template-rows: 1fr auto;
-    grid-template-columns: minmax(110px, 1fr) 2fr;
+    grid-template-columns: 2fr minmax(150px, 1fr);
     grid-template-areas:
       "canvas canvas"
       "move actions";
@@ -248,7 +249,7 @@
   /* MOVE PAD — visible joystick that lives outside the field */
   .move-pad {
     grid-area: move;
-    height: 110px;
+    height: 130px;
     position: relative;
     background: var(--bg-2);
     border: 1px solid var(--line);
@@ -259,14 +260,14 @@
     overflow: hidden;
   }
   .move-pad .mp-ring {
-    width: 78px; height: 78px;
+    width: 100px; height: 100px;
     border: 2px solid var(--line);
     border-radius: 50%;
     pointer-events: none;
   }
   .move-pad .mp-knob {
     position: absolute;
-    width: 36px; height: 36px;
+    width: 46px; height: 46px;
     background: var(--accent);
     border: 2px solid rgba(255,255,255,0.6);
     border-radius: 50%;
@@ -288,14 +289,14 @@
   /* ACTION BUTTONS (boost + kick) */
   .action-buttons {
     grid-area: actions;
-    height: 110px;
-    display: flex; gap: 8px;
+    height: 130px;
+    display: flex; gap: 6px;
   }
   .touch-btn {
     flex: 1;
     font-family: 'Space Mono', monospace;
-    font-size: 14px; font-weight: 700;
-    letter-spacing: 0.22em;
+    font-size: 12px; font-weight: 700;
+    letter-spacing: 0.18em;
     border: 2px solid var(--line);
     background: var(--bg-2);
     color: var(--ink);
@@ -317,18 +318,22 @@
     pointer-events: none;
   }
 
-  /* Landscape phone (or any short-and-wide window): side panels flank the canvas */
+  /* Landscape phone (or any short-and-wide window): side panels flank the canvas.
+     Wider move-pad on the left, slimmer button column on the right. */
   @media (orientation: landscape) and (max-height: 700px) {
     .game-body {
       grid-template-rows: 1fr;
-      grid-template-columns: 110px 1fr 110px;
+      grid-template-columns: 150px 1fr 90px;
       grid-template-areas: "move canvas actions";
     }
     .move-pad { height: 100%; }
+    .move-pad .mp-ring { width: 110px; height: 110px; }
+    .move-pad .mp-knob { width: 50px; height: 50px; }
     .action-buttons {
       flex-direction: column;
       height: 100%;
     }
+    .action-buttons .touch-btn { font-size: 11px; }
   }
 
   /* PC mode: hide on-screen controls entirely; canvas takes full space */
@@ -766,6 +771,18 @@
           <button class="opt active" data-diff="normal">Normal</button>
           <button class="opt" data-diff="hard">Hard</button>
         </div>
+        <div class="label">Ball Style</div>
+        <div class="options three" id="ballStyleOpts">
+          <button class="opt active" data-style="normal">Normal</button>
+          <button class="opt" data-style="bouncy">⚡ Bouncy</button>
+          <button class="opt" data-style="ice">❄ Ice</button>
+        </div>
+        <div class="label">Number of Balls</div>
+        <div class="options three" id="numBallsOpts">
+          <button class="opt active" data-num="1">1 ball</button>
+          <button class="opt" data-num="2">2 balls</button>
+          <button class="opt" data-num="3">3 balls</button>
+        </div>
       </div>
       <div id="golfOpts" style="display:none;">
         <div class="label">Course Length</div>
@@ -773,6 +790,11 @@
           <button class="opt" data-course="3">3 holes</button>
           <button class="opt active" data-course="6">6 holes</button>
           <button class="opt" data-course="9">9 holes</button>
+        </div>
+        <div class="label">Course Set</div>
+        <div class="options" id="courseSetOpts">
+          <button class="opt active" data-rand="0">📜 Curated</button>
+          <button class="opt" data-rand="1">🎲 Random</button>
         </div>
       </div>
     </div>
@@ -810,6 +832,7 @@
     <div class="hud" id="matchHud" style="display:none;">
       <div class="hud-team red"><span class="dot"></span><span class="hud-score" id="redScore">0</span></div>
       <div style="display:flex;align-items:center;gap:6px;">
+        <span class="hud-mid" id="ballStyleTag" style="display:none;"></span>
         <span class="hud-mid" id="timer">00:00</span>
         <button class="hud-back" id="exitBtn1">EXIT</button>
       </div>
@@ -1030,8 +1053,8 @@ const localState = {
   selectedMode: 'match',
   roomCode: null,
   isHost: false,
-  matchOpts: { arena: 'classic', goalsToWin: 3, timeLimit: 0, botDifficulty: 'normal' },
-  golfOpts: { courseLength: 6 },
+  matchOpts: { arena: 'classic', goalsToWin: 3, timeLimit: 0, botDifficulty: 'normal', ballStyle: 'normal', numBalls: 1 },
+  golfOpts: { courseLength: 6, randomCourses: false },
   // server-pushed state
   game: {
     mode: null, state: 'lobby',
@@ -1334,7 +1357,10 @@ bindOptGroup('arenaOpts', 'arena', 'arena', 'matchOpts');
 bindOptGroup('goalsOpts', 'goalsToWin', 'goals', 'matchOpts', v => parseInt(v, 10));
 bindOptGroup('timeOpts', 'timeLimit', 'time', 'matchOpts', v => parseInt(v, 10));
 bindOptGroup('botDiffOpts', 'botDifficulty', 'diff', 'matchOpts');
+bindOptGroup('ballStyleOpts', 'ballStyle', 'style', 'matchOpts');
+bindOptGroup('numBallsOpts', 'numBalls', 'num', 'matchOpts', v => parseInt(v, 10));
 bindOptGroup('courseOpts', 'courseLength', 'course', 'golfOpts', v => parseInt(v, 10));
+bindOptGroup('courseSetOpts', 'randomCourses', 'rand', 'golfOpts', v => v === '1');
 
 function updateLobby(msg) {
   // Detect host changes for a friendly toast
@@ -1368,8 +1394,11 @@ function updateLobby(msg) {
     document.querySelectorAll('#goalsOpts .opt').forEach(b => b.classList.toggle('active', parseInt(b.dataset.goals) === msg.matchOpts.goalsToWin));
     document.querySelectorAll('#timeOpts .opt').forEach(b => b.classList.toggle('active', parseInt(b.dataset.time) === (msg.matchOpts.timeLimit||0)));
     document.querySelectorAll('#botDiffOpts .opt').forEach(b => b.classList.toggle('active', b.dataset.diff === (msg.matchOpts.botDifficulty||'normal')));
+    document.querySelectorAll('#ballStyleOpts .opt').forEach(b => b.classList.toggle('active', b.dataset.style === (msg.matchOpts.ballStyle||'normal')));
+    document.querySelectorAll('#numBallsOpts .opt').forEach(b => b.classList.toggle('active', parseInt(b.dataset.num) === (msg.matchOpts.numBalls||1)));
   } else {
     document.querySelectorAll('#courseOpts .opt').forEach(b => b.classList.toggle('active', parseInt(b.dataset.course) === msg.golfOpts.courseLength));
+    document.querySelectorAll('#courseSetOpts .opt').forEach(b => b.classList.toggle('active', (b.dataset.rand === '1') === !!msg.golfOpts.randomCourses));
   }
 
   // Player list with team chips (match mode only)
@@ -1849,6 +1878,20 @@ function updateHUD() {
     timerEl.textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
     // Visual urgency in last 30s of a timed match
     timerEl.style.color = (lim > 0 && t <= 30 && t > 0) ? 'var(--red)' : '';
+    // Ball-style + multi-ball tag
+    const styleTag = document.getElementById('ballStyleTag');
+    const style = localState.game.ballStyle || 'normal';
+    const nb = localState.game.numBalls || 1;
+    const parts = [];
+    if (style === 'bouncy') parts.push('⚡ BOUNCY');
+    else if (style === 'ice') parts.push('❄ ICE');
+    if (nb > 1) parts.push('×' + nb);
+    if (parts.length) {
+      styleTag.textContent = parts.join(' ');
+      styleTag.style.display = 'inline-block';
+    } else {
+      styleTag.style.display = 'none';
+    }
   } else if (localState.game.mode === 'golf') {
     document.getElementById('holeNum').textContent = (localState.game.currentHole || 0) + 1;
     document.getElementById('holeTotal').textContent = localState.game.totalHoles || 6;
@@ -1963,6 +2006,10 @@ function drawMatch() {
     pushBallTrail(ball.x, ball.y);
     detectKickFlash(ball);
   }
+
+  // Extra balls (multi-ball mode) — drawn without trails to keep the chaos readable
+  const extras = localState.game.extraBalls || [];
+  for (const eb of extras) drawBall(eb.x, eb.y, 14);
 
   // Kick flash ring
   drawKickFlash();

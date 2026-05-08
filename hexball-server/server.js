@@ -42,6 +42,108 @@ const arenas = {
   hex:     { w: 900, h: 540, goalH: 200, hex: true },
 };
 
+// ============== PROCEDURAL GOLF COURSE GENERATOR ==============
+// Used when the room toggles "Random Holes". Generates a course with
+// randomized walls, bumpers, sand, water, and (rarely) portals. Element
+// placements respect a small "keep-out" radius around the start and the
+// hole so the course is always playable. Names are pulled from a pool.
+const RANDOM_NAMES = [
+  'Crooked Creek','Foggy Glen','Tornado Alley','Whisper Hill','Lava Pit',
+  'Maze Park','Twin Trees','Echo Valley','Iron Course','Last Light',
+  'Winding Way','Storm Front','Sunken Garden','Bramble','Fork in the Road',
+];
+function rand(min, max) { return min + Math.random() * (max - min); }
+function generateCourse() {
+  const w = 540, h = 900;
+  // Start in lower third, hole in upper third — long enough to be a real putt.
+  const ballStart = { x: rand(120, w-120), y: rand(h-150, h-80) };
+  const hole = { x: rand(120, w-120), y: rand(80, 180), r: 22 };
+  const keepOut = (x, y, pad) => {
+    if (Math.hypot(x - ballStart.x, y - ballStart.y) < 90 + pad) return false;
+    if (Math.hypot(x - hole.x, y - hole.y) < 80 + pad) return false;
+    return true;
+  };
+
+  // Bumpers
+  const bumpers = [];
+  const numBumpers = Math.floor(rand(0, 5));
+  for (let attempt = 0; attempt < 30 && bumpers.length < numBumpers; attempt++) {
+    const x = rand(80, w-80), y = rand(220, h-220);
+    if (!keepOut(x, y, 30)) continue;
+    if (bumpers.some(b => Math.hypot(b.x - x, b.y - y) < b.r + 50)) continue;
+    bumpers.push({ x, y, r: rand(20, 32) });
+  }
+
+  // Walls (always horizontal or vertical rectangles for predictability)
+  const walls = [];
+  const numWalls = Math.floor(rand(0, 3));
+  for (let attempt = 0; attempt < 20 && walls.length < numWalls; attempt++) {
+    const horizontal = Math.random() < 0.5;
+    const wx = horizontal ? rand(40, w-260) : rand(40, w-40);
+    const wy = rand(220, h-260);
+    const ww = horizontal ? rand(160, 240) : 16;
+    const wh = horizontal ? 16 : rand(160, 240);
+    const cx = wx + ww/2, cy = wy + wh/2;
+    if (!keepOut(cx, cy, 40)) continue;
+    walls.push({ x: wx, y: wy, w: ww, h: wh });
+  }
+
+  // Sand patches
+  const sand = [];
+  const numSand = Math.floor(rand(0, 3));
+  for (let attempt = 0; attempt < 15 && sand.length < numSand; attempt++) {
+    const x = rand(80, w-80), y = rand(220, h-220);
+    if (!keepOut(x, y, 40)) continue;
+    sand.push({ x, y, r: rand(50, 80) });
+  }
+
+  // Water (less likely + smaller, never crosses hole/start)
+  const water = [];
+  if (Math.random() < 0.45) {
+    for (let attempt = 0; attempt < 10 && water.length < 1; attempt++) {
+      const wx = rand(40, w-200), wy = rand(280, h-360);
+      const ww = rand(120, 200), wh = rand(60, 110);
+      // Avoid water that overlaps start or hole
+      const corners = [[wx,wy],[wx+ww,wy],[wx,wy+wh],[wx+ww,wy+wh]];
+      const blocks = corners.some(([cx,cy]) => !keepOut(cx, cy, 30));
+      if (blocks) continue;
+      water.push({ x: wx, y: wy, w: ww, h: wh });
+    }
+  }
+
+  // Portals (paired) — rare, never close to start/hole
+  const portals = [];
+  if (Math.random() < 0.25) {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const a = { x: rand(80, w-80), y: rand(280, h-280), r: 28 };
+      const b = { x: rand(80, w-80), y: rand(280, h-280), r: 28 };
+      if (Math.hypot(a.x-b.x, a.y-b.y) < 200) continue;
+      if (!keepOut(a.x, a.y, 40) || !keepOut(b.x, b.y, 40)) continue;
+      const palette = ['#d44ba8','#4bdcb5','#f5d76e','#9ab8ff'];
+      const color = palette[Math.floor(Math.random()*palette.length)];
+      portals.push({ x: a.x, y: a.y, r: a.r, target: { x: b.x, y: b.y }, color });
+      portals.push({ x: b.x, y: b.y, r: b.r, target: { x: a.x, y: a.y }, color });
+      break;
+    }
+  }
+
+  // Wind (rarely)
+  const wind = Math.random() < 0.18 ? { fx: rand(-0.06, 0.06), fy: 0 } : null;
+
+  // Par scales loosely with obstacle count
+  const obs = bumpers.length + walls.length + sand.length + water.length + portals.length;
+  const par = clamp(2 + Math.floor(obs / 2) + Math.floor(rand(0, 2)), 2, 6);
+
+  return {
+    w, h, par,
+    ballStart, hole,
+    walls, bumpers, sand, water, portals,
+    wind,
+    name: RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)],
+    randomized: true,
+  };
+}
+
 // ============== GOLF COURSES ==============
 const courses = [
   { w:540,h:900,par:2, ballStart:{x:270,y:760}, hole:{x:270,y:140,r:22}, walls:[], bumpers:[{x:270,y:450,r:28}], sand:[], water:[], portals:[], wind:null, name:'Welcome' },
@@ -85,13 +187,19 @@ class Room {
       goalsToWin: opts.goalsToWin || 3,
       timeLimit: opts.timeLimit || 0, // seconds; 0 = first-to-goalsToWin
       botDifficulty: opts.botDifficulty || 'normal', // easy | normal | hard
+      ballStyle: opts.ballStyle || 'normal',         // normal | bouncy | ice
+      numBalls: clamp(opts.numBalls || 1, 1, 3),     // 1, 2, or 3 balls in play
     };
     this.scoreRed = 0;
     this.scoreBlue = 0;
     this.matchBall = null;
 
     // Golf-specific
-    this.golfOpts = { courseLength: opts.courseLength || 6 };
+    this.golfOpts = {
+      courseLength: opts.courseLength || 6,
+      randomCourses: !!opts.randomCourses,
+    };
+    this.activeCourses = []; // resolved course list for this match (random or fixed)
     this.currentHole = 0;
     this.holeStartTime = 0;
     this.scorecards = new Map(); // playerId -> [{par, strokes, name}]
@@ -317,7 +425,20 @@ class Room {
     if (this.players.size < 1) return;
     this.state = 'playing';
     if (this.mode === 'match') this.initMatch();
-    else this.initGolfHole();
+    else {
+      // Resolve the course set for this round (random or fixed slice).
+      const len = this.golfOpts.courseLength;
+      if (this.golfOpts.randomCourses) {
+        this.activeCourses = [];
+        for (let i = 0; i < len; i++) this.activeCourses.push(generateCourse());
+      } else {
+        this.activeCourses = courses.slice(0, len);
+      }
+      this.currentHole = 0;
+      this.scorecards = new Map();
+      this.holeCompletePlayers = new Set();
+      this.initGolfHole();
+    }
     this.lastTick = Date.now();
     if (this.tickInterval) { clearInterval(this.tickInterval); }
     this.tickInterval = setInterval(() => this.tick(), TICK_MS);
@@ -364,10 +485,18 @@ class Room {
       p.input.ax = 0; p.input.ay = 0;
     }
     this.matchBall = { x: W/2, y: H/2, vx: 0, vy: 0, r: BALL_R };
+    // Multi-ball: spawn extras around the center with a tiny outward push.
+    this.extraBalls = [];
+    const N = Math.max(1, Math.min(3, this.matchOpts.numBalls || 1));
+    for (let i = 1; i < N; i++) {
+      const ang = (i - 1) * Math.PI + Math.PI / 2; // alternate above/below center
+      const dx = Math.cos(ang) * 70, dy = Math.sin(ang) * 70;
+      this.extraBalls.push({ x: W/2 + dx, y: H/2 + dy, vx: 0, vy: 0, r: BALL_R });
+    }
   }
 
   initGolfHole() {
-    const h = courses[this.currentHole];
+    const h = this.activeCourses[this.currentHole];
     const angleStep = (Math.PI * 2) / Math.max(this.players.size, 1);
     let i = 0;
     for (const p of this.players.values()) {
@@ -435,13 +564,41 @@ class Room {
   }
 
   // ---------- MATCH MODE ----------
+  // Compose the live tuning, applying ball-style modifiers if any.
+  effectiveMatchTuning() {
+    const style = this.matchOpts.ballStyle || 'normal';
+    if (style === 'bouncy') {
+      // Energy-GAIN bounces: ball gets faster off walls. Capped via clampSpeed
+      // inside substeps so it doesn't go to infinity.
+      return { ...MATCH_TUNING, ballBounce: 1.05, ballMax: 14.5, fb: 0.997 };
+    }
+    if (style === 'ice') {
+      // Almost frictionless ball — slides forever, glassy feel.
+      return { ...MATCH_TUNING, fb: 0.999, ballBounce: 0.92, ballMax: 12 };
+    }
+    return MATCH_TUNING;
+  }
+
   tickMatch() {
-    const T = MATCH_TUNING;
+    const T = this.effectiveMatchTuning();
     const arena = arenas[this.matchOpts.arena];
 
     this.tickBots();
     for (const p of this.players.values()) this.updatePlayer(p, T, arena, null);
     this.updateMatchBall(T, arena);
+    // Update extra balls (multi-ball mode)
+    if (this.extraBalls && this.extraBalls.length) {
+      for (const eb of this.extraBalls) this.updateExtraBall(eb, T, arena);
+      // Ball-ball collisions amongst all the match balls
+      const all = [this.matchBall, ...this.extraBalls];
+      for (let i = 0; i < all.length; i++) {
+        for (let j = i+1; j < all.length; j++) this.collideCircles(all[i], all[j]);
+      }
+      // Players should also collide with extra balls
+      for (const p of this.players.values()) {
+        for (const eb of this.extraBalls) this.collidePlayerBall(p, eb, T);
+      }
+    }
 
     // player-player collisions
     const arr = [...this.players.values()];
@@ -455,6 +612,62 @@ class Room {
     if (this.matchOpts.timeLimit > 0 && this.matchTime >= this.matchOpts.timeLimit) {
       this.endMatch();
     }
+  }
+
+  // Multi-ball mode: extras follow the same wall physics, but a goal awards a
+  // score AND immediately respawns just that ball at center (no full match pause).
+  updateExtraBall(ball, T, arena) {
+    const W = arena.w, H = arena.h, gh = arena.goalH;
+    const gT = (H - gh) / 2, gB = (H + gh) / 2;
+    ball.vx *= T.fb; ball.vy *= T.fb;
+    clampSpeed(ball, T.ballMax);
+    for (let i = 0; i < SUBSTEPS; i++) {
+      ball.x += ball.vx / SUBSTEPS;
+      ball.y += ball.vy / SUBSTEPS;
+      if (ball.y - ball.r < 0) { ball.y = ball.r; ball.vy *= -T.ballBounce; }
+      if (ball.y + ball.r > H) { ball.y = H - ball.r; ball.vy *= -T.ballBounce; }
+      if (arena.hex) this.hexCornerCollide(ball, arena, T.ballBounce);
+      if (ball.x - ball.r < -ball.r) {
+        if (ball.y > gT && ball.y < gB) { this.onMultiGoal('blue', ball, W, H); return; }
+        else { ball.x = ball.r; ball.vx *= -T.ballBounce; }
+      }
+      if (ball.x + ball.r > W + ball.r) {
+        if (ball.y > gT && ball.y < gB) { this.onMultiGoal('red', ball, W, H); return; }
+        else { ball.x = W - ball.r; ball.vx *= -T.ballBounce; }
+      }
+      if (ball.x - ball.r < 0 && (ball.y < gT || ball.y > gB)) { ball.x = ball.r; ball.vx *= -T.ballBounce; }
+      if (ball.x + ball.r > W && (ball.y < gT || ball.y > gB)) { ball.x = W - ball.r; ball.vx *= -T.ballBounce; }
+      if (T.ballBounce >= 1) clampSpeed(ball, T.ballMax);
+    }
+  }
+
+  // Goal scored on an EXTRA ball — award the team but keep the match running.
+  onMultiGoal(scorer, ball, W, H) {
+    if (scorer === 'red') this.scoreRed++; else this.scoreBlue++;
+    this.lastScorer = scorer;
+    const lt = this.lastBallTouch;
+    const ownGoal = !!(lt && lt.team && lt.team !== scorer);
+    if (lt && !ownGoal) {
+      const sp = this.players.get(lt.id); if (sp) sp.goals = (sp.goals||0) + 1;
+    } else if (lt && ownGoal) {
+      const sp = this.players.get(lt.id); if (sp) sp.ownGoals = (sp.ownGoals||0) + 1;
+    }
+    this.goalLog.push({
+      minute: Math.round(this.matchTime),
+      scorer, scorerName: lt ? lt.name : null, ownGoal, assistName: null,
+    });
+    this.broadcast({
+      type: 'goal', scorer,
+      scoreRed: this.scoreRed, scoreBlue: this.scoreBlue,
+      scorerName: lt ? lt.name : null, ownGoal, assistName: null,
+    });
+    this.lastBallTouch = null;
+    if (this.scoreRed >= this.matchOpts.goalsToWin || this.scoreBlue >= this.matchOpts.goalsToWin) {
+      this.endMatch();
+      return;
+    }
+    // Respawn this single ball at center
+    ball.x = W / 2; ball.y = H / 2; ball.vx = 0; ball.vy = 0;
   }
 
   // Landscape ball physics:
@@ -487,6 +700,8 @@ class Room {
       // Solid wall outside goal-mouth y-range
       if (ball.x - ball.r < 0 && (ball.y < gT || ball.y > gB)) { ball.x = ball.r; ball.vx *= -T.ballBounce; }
       if (ball.x + ball.r > W && (ball.y < gT || ball.y > gB)) { ball.x = W - ball.r; ball.vx *= -T.ballBounce; }
+      // Re-clamp inside substep so bouncy mode (ballBounce > 1) can't blow up
+      if (T.ballBounce >= 1) clampSpeed(ball, T.ballMax);
     }
   }
 
@@ -576,7 +791,7 @@ class Room {
   // ---------- GOLF MODE ----------
   tickGolf() {
     const T = GOLF_TUNING;
-    const h = courses[this.currentHole];
+    const h = this.activeCourses[this.currentHole];
 
     for (const p of this.players.values()) {
       if (this.holeCompletePlayers.has(p.id)) continue;
@@ -653,16 +868,23 @@ class Room {
       }
     }
 
-    // cup
+    // Cup absorption — slowed-down ball drops in. Threshold raised significantly
+    // so fast putts can still sink (was 4.5, now ~80% of max ball speed).
+    // We also apply a strong "drag" inside the cup zone to brake fast balls
+    // toward the threshold rather than rejecting them outright.
     const dHole = Math.hypot(ball.x - h.hole.x, ball.y - h.hole.y);
     if (dHole < h.hole.r) {
       const sp = Math.hypot(ball.vx, ball.vy);
-      if (sp < 4.5) {
+      const dropThreshold = T.ballMax * 0.85; // 8.075 for golf
+      if (sp < dropThreshold) {
         this.onPlayerHoledOut(p);
       } else {
-        const nx = (ball.x - h.hole.x) / (dHole || 0.001);
-        const ny = (ball.y - h.hole.y) / (dHole || 0.001);
-        ball.vx += nx * 0.5; ball.vy += ny * 0.5;
+        // Strong braking once over the cup, plus a small inward pull so the ball
+        // doesn't sail straight across — helps it sink on the next pass.
+        ball.vx *= 0.78; ball.vy *= 0.78;
+        const nx = (h.hole.x - ball.x) / (dHole || 0.001);
+        const ny = (h.hole.y - ball.y) / (dHole || 0.001);
+        ball.vx += nx * 0.6; ball.vy += ny * 0.6;
       }
     }
   }
@@ -670,7 +892,7 @@ class Room {
   onPlayerHoledOut(p) {
     if (this.holeCompletePlayers.has(p.id)) return;
     this.holeCompletePlayers.add(p.id);
-    const h = courses[this.currentHole];
+    const h = this.activeCourses[this.currentHole];
     const card = this.scorecards.get(p.id) || [];
     card.push({ par: h.par, strokes: p.strokes, name: h.name });
     this.scorecards.set(p.id, card);
@@ -694,7 +916,7 @@ class Room {
           this.endGolf();
         } else {
           this.initGolfHole();
-          this.broadcast({ type: 'newHole', hole: this.currentHole, holeData: courses[this.currentHole] });
+          this.broadcast({ type: 'newHole', hole: this.currentHole, holeData: this.activeCourses[this.currentHole] });
         }
       }, 2200);
     } else {
@@ -775,11 +997,13 @@ class Room {
       if (this.mode === 'match') {
         this.collidePlayerBall(p, this.matchBall, T);
       } else {
-        // collide with own ball
-        this.collidePlayerBall(p, p.ball, T);
-        // also collide with OTHER players' balls (the fight!)
+        // Golf: skip the player↔ball collision when the ball is over the cup so
+        // a player standing on the hole can't body-block the putt. The hole's
+        // own absorption logic in updateGolfBall takes over from there.
+        const overCup = (b) => Math.hypot(b.x - hole.hole.x, b.y - hole.hole.y) < hole.hole.r + 8;
+        if (p.ball && !overCup(p.ball)) this.collidePlayerBall(p, p.ball, T);
         for (const other of this.players.values()) {
-          if (other.id !== p.id && other.ball && !this.holeCompletePlayers.has(other.id)) {
+          if (other.id !== p.id && other.ball && !this.holeCompletePlayers.has(other.id) && !overCup(other.ball)) {
             this.collidePlayerBall(p, other.ball, T);
           }
         }
@@ -964,6 +1188,12 @@ class Room {
       msg.arena = this.matchOpts.arena;
       msg.goalsToWin = this.matchOpts.goalsToWin;
       msg.timeLimit = this.matchOpts.timeLimit || 0;
+      msg.ballStyle = this.matchOpts.ballStyle || 'normal';
+      msg.numBalls = this.matchOpts.numBalls || 1;
+      // Multi-ball: include extra balls
+      if (this.extraBalls && this.extraBalls.length) {
+        msg.extraBalls = this.extraBalls.map(b => ({ x: Math.round(b.x*10)/10, y: Math.round(b.y*10)/10 }));
+      }
     } else {
       msg.currentHole = this.currentHole;
       msg.totalHoles = this.golfOpts.courseLength;
@@ -1132,9 +1362,20 @@ wss.on('connection', (ws) => {
           if (msg.matchOpts.botDifficulty && ['easy','normal','hard'].includes(msg.matchOpts.botDifficulty)) {
             currentRoom.matchOpts.botDifficulty = msg.matchOpts.botDifficulty;
           }
+          if (msg.matchOpts.ballStyle && ['normal','bouncy','ice'].includes(msg.matchOpts.ballStyle)) {
+            currentRoom.matchOpts.ballStyle = msg.matchOpts.ballStyle;
+          }
+          if (msg.matchOpts.numBalls !== undefined) {
+            currentRoom.matchOpts.numBalls = clamp(parseInt(msg.matchOpts.numBalls) || 1, 1, 3);
+          }
         }
         if (currentRoom.mode === 'golf' && msg.golfOpts) {
-          if (msg.golfOpts.courseLength) currentRoom.golfOpts.courseLength = clamp(parseInt(msg.golfOpts.courseLength), 1, courses.length);
+          // Cap to existing fixed-course count when in fixed mode; allow up to 18 for random.
+          if (msg.golfOpts.courseLength) {
+            const max = currentRoom.golfOpts.randomCourses ? 18 : courses.length;
+            currentRoom.golfOpts.courseLength = clamp(parseInt(msg.golfOpts.courseLength), 1, max);
+          }
+          if (msg.golfOpts.randomCourses !== undefined) currentRoom.golfOpts.randomCourses = !!msg.golfOpts.randomCourses;
         }
         currentRoom.sendLobbyState();
         break;
@@ -1144,7 +1385,7 @@ wss.on('connection', (ws) => {
         currentRoom.start();
         currentRoom.broadcast({ type: 'gameStart', mode: currentRoom.mode });
         if (currentRoom.mode === 'golf') {
-          currentRoom.broadcast({ type: 'newHole', hole: 0, holeData: courses[0] });
+          currentRoom.broadcast({ type: 'newHole', hole: 0, holeData: currentRoom.activeCourses[0] });
         }
         break;
       }
