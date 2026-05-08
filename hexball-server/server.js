@@ -101,6 +101,18 @@ class Room {
     this.kickoffCountdown = 0; // ticks remaining for "3-2-1-GO" pre-kickoff freeze
     this.lastScorer = null; // 'red' | 'blue' | null
     this.lastBallTouch = null; // { id, name, team } — last player to touch the match ball
+    this.touchHistory = []; // last several distinct touches (for assists)
+    this.goalLog = []; // [{minute, scorerName, ownGoal, assistName, scorer}]
+  }
+
+  recordBallTouch(p) {
+    if (this.mode !== 'match') return;
+    this.lastBallTouch = { id: p.id, name: p.name, team: p.team };
+    const last = this.touchHistory[this.touchHistory.length - 1];
+    if (!last || last.id !== p.id) {
+      this.touchHistory.push({ id: p.id, name: p.name, team: p.team, t: Date.now() });
+      if (this.touchHistory.length > 6) this.touchHistory.shift();
+    }
   }
 
   uniqueName(rawName) {
@@ -255,6 +267,13 @@ class Room {
     this.matchTime = 0;
     this.goalCelebration = 0;
     this.lastScorer = null;
+    this.lastBallTouch = null;
+    this.touchHistory = [];
+    this.goalLog = [];
+    // Reset per-match player stats
+    for (const p of this.players.values()) {
+      p.goals = 0; p.ownGoals = 0; p.assists = 0;
+    }
     this.resetPositions();
     this.kickoffCountdown = TICK_HZ * 3; // 3-second countdown on first kickoff
   }
@@ -404,6 +423,38 @@ class Room {
     this.lastScorer = scorer;
     const lt = this.lastBallTouch;
     const ownGoal = !!(lt && lt.team && lt.team !== scorer);
+
+    // Tally per-player stats and find an assister.
+    let assistName = null;
+    if (lt) {
+      const scorerPlayer = this.players.get(lt.id);
+      if (scorerPlayer) {
+        if (ownGoal) scorerPlayer.ownGoals = (scorerPlayer.ownGoals || 0) + 1;
+        else scorerPlayer.goals = (scorerPlayer.goals || 0) + 1;
+      }
+      if (!ownGoal) {
+        // Look back through touch history for the most recent OTHER same-team touch within 5s.
+        const now = Date.now();
+        for (let i = this.touchHistory.length - 2; i >= 0; i--) {
+          const h = this.touchHistory[i];
+          if (h.id === lt.id) continue;
+          if (h.team !== scorer) break; // opposing touch broke the play
+          if (now - h.t > 5000) break;
+          const ap = this.players.get(h.id);
+          if (ap) { ap.assists = (ap.assists || 0) + 1; assistName = ap.name; }
+          break;
+        }
+      }
+    }
+
+    this.goalLog.push({
+      minute: Math.round(this.matchTime),
+      scorer,
+      scorerName: lt ? lt.name : null,
+      ownGoal,
+      assistName,
+    });
+
     this.broadcast({
       type: 'goal',
       scorer,
@@ -411,6 +462,7 @@ class Room {
       scoreBlue: this.scoreBlue,
       scorerName: lt ? lt.name : null,
       ownGoal,
+      assistName,
     });
     this.lastBallTouch = null;
     this.goalCelebration = TICK_HZ * 2;
@@ -429,11 +481,17 @@ class Room {
     this.state = 'finished';
     if (this.tickInterval) { clearInterval(this.tickInterval); this.tickInterval = null; }
     const winner = this.scoreRed === this.scoreBlue ? 'draw' : (this.scoreRed > this.scoreBlue ? 'red' : 'blue');
+    const playerStats = [...this.players.values()].map(p => ({
+      id: p.id, name: p.name, color: p.color, team: p.team, isBot: !!p.isBot,
+      goals: p.goals || 0, ownGoals: p.ownGoals || 0, assists: p.assists || 0,
+    }));
     this.broadcast({
       type: 'matchEnd',
       winner,
       scoreRed: this.scoreRed,
       scoreBlue: this.scoreBlue,
+      playerStats,
+      goalLog: this.goalLog,
     });
     setTimeout(() => {
       // Skip if a rematch was already started.
@@ -681,7 +739,7 @@ class Room {
             p.strokes++;
             p.lastKickPos = { x: b.x, y: b.y };
           }
-          if (this.mode === 'match') this.lastBallTouch = { id: p.id, name: p.name, team: p.team };
+          if (this.mode === 'match') this.recordBallTouch(p);
           kicked = true;
         }
       }
@@ -706,7 +764,7 @@ class Room {
         ball.vy -= (1 + restitution) * dot * ny;
         clampSpeed(ball, T.ballMax);
         if (this.mode === 'match' && ball === this.matchBall) {
-          this.lastBallTouch = { id: p.id, name: p.name, team: p.team };
+          this.recordBallTouch(p);
         }
       }
     }

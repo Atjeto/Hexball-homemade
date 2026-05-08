@@ -1041,7 +1041,7 @@ function handleMessage(msg) {
     case 'goal':
       localState.game.scoreRed = msg.scoreRed;
       localState.game.scoreBlue = msg.scoreBlue;
-      showScorerBanner(msg.scorer, msg.scoreRed, msg.scoreBlue, msg.scorerName, msg.ownGoal);
+      showScorerBanner(msg.scorer, msg.scoreRed, msg.scoreBlue, msg.scorerName, msg.ownGoal, msg.assistName);
       audio.play('whistle');
       setTimeout(() => audio.play('goal'), 250);
       shakeCanvas();
@@ -2154,16 +2154,20 @@ gameChatInput.addEventListener('keydown', e => {
   e.stopPropagation(); // don't let WASD bleed into movement while typing
 });
 
-// Scorer banner: "RED SCORES!" / "BLUE SCORES!" with current score (and scorer name if provided).
-function showScorerBanner(scorer, sR, sB, scorerName, ownGoal) {
+// Scorer banner: "RED SCORES!" / "BLUE SCORES!" with current score and scorer/assist if provided.
+function showScorerBanner(scorer, sR, sB, scorerName, ownGoal, assistName) {
   const banner = document.getElementById('scorerBanner');
   const scorerColor = scorer === 'red' ? theme.red : theme.blue;
   banner.style.color = scorerColor;
   banner.style.display = 'block';
   const headline = scorer === 'red' ? 'RED SCORES!' : 'BLUE SCORES!';
   let byline = '';
-  if (ownGoal && scorerName) byline = `<span class="byline">😬 OWN GOAL by ${escapeHtml(scorerName)}</span>`;
-  else if (scorerName) byline = `<span class="byline">⚽ ${escapeHtml(scorerName)}</span>`;
+  if (ownGoal && scorerName) {
+    byline = `<span class="byline">😬 OWN GOAL by ${escapeHtml(scorerName)}</span>`;
+  } else if (scorerName) {
+    const assist = assistName ? ` <span style="opacity:0.7; font-size:0.85em;">↪ ${escapeHtml(assistName)}</span>` : '';
+    byline = `<span class="byline">⚽ ${escapeHtml(scorerName)}${assist}</span>`;
+  }
   banner.innerHTML = headline + byline + `<span class="sub">${sR} – ${sB}</span>`;
   banner.classList.remove('show'); void banner.offsetWidth; banner.classList.add('show');
   const f = document.getElementById('flash');
@@ -2179,10 +2183,49 @@ function showMatchEnd(msg) {
   const draw = msg.winner === 'draw' || msg.scoreRed === msg.scoreBlue;
   const won = !draw && myTeam ? (msg.winner === myTeam) : false;
   document.getElementById('endTitle').textContent = draw ? 'DRAW' : (won ? 'YOU WON' : 'DEFEAT');
-  document.getElementById('resultsTable').innerHTML = `
+
+  // Score header
+  let html = `
     <tr><th>RED</th><th>BLUE</th></tr>
     <tr><td style="font-size:32px;color:var(--red);">${msg.scoreRed}</td><td style="font-size:32px;color:var(--blue);">${msg.scoreBlue}</td></tr>
   `;
+
+  // Per-player stats: rank by (goals + assists) desc, MVP = top scorer
+  if (msg.playerStats && msg.playerStats.length) {
+    const stats = msg.playerStats.slice().sort((a,b) => (b.goals*2 + b.assists - b.ownGoals) - (a.goals*2 + a.assists - a.ownGoals));
+    const mvp = stats.find(s => s.goals > 0 || s.assists > 0);
+    if (mvp) {
+      const teamColor = mvp.team === 'red' ? 'var(--red)' : 'var(--blue)';
+      html += `<tr><td colspan="2" style="padding-top:14px; color:var(--accent); letter-spacing:0.18em; font-size:11px;">⭐ MVP — <span style="color:${teamColor}">${escapeHtml(mvp.name)}</span> · ${mvp.goals}G ${mvp.assists}A</td></tr>`;
+    }
+    html += '<tr><th colspan="2" style="padding-top:10px;">PLAYER · G · A · OG</th></tr>';
+    for (const s of stats) {
+      const teamColor = s.team === 'red' ? 'var(--red)' : 'var(--blue)';
+      const ownStr = s.ownGoals > 0 ? `<span style="color:var(--muted);">${s.ownGoals}</span>` : `<span style="color:var(--muted);">0</span>`;
+      const me = s.id === localState.playerId ? ' (you)' : '';
+      const bot = s.isBot ? ' 🤖' : '';
+      html += `<tr><td colspan="2" style="text-align:left; padding:4px 0;">
+        <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${teamColor}; margin-right:8px;"></span>
+        ${escapeHtml(s.name)}${bot}${me} · <strong>${s.goals}</strong>G · ${s.assists}A · ${ownStr}OG
+      </td></tr>`;
+    }
+  }
+
+  // Goal log timeline
+  if (msg.goalLog && msg.goalLog.length) {
+    html += '<tr><th colspan="2" style="padding-top:10px;">GOALS</th></tr>';
+    for (const g of msg.goalLog) {
+      const teamColor = g.scorer === 'red' ? 'var(--red)' : 'var(--blue)';
+      const m = Math.floor((g.minute||0) / 60), s = String((g.minute||0) % 60).padStart(2,'0');
+      const tag = g.ownGoal ? '😬 OG' : '⚽';
+      const assist = g.assistName ? ` <span style="color:var(--muted);">↪ ${escapeHtml(g.assistName)}</span>` : '';
+      html += `<tr><td colspan="2" style="text-align:left; padding:2px 0; color:${teamColor};">
+        <span style="color:var(--muted); font-size:10px;">${m}:${s}</span> ${tag} ${escapeHtml(g.scorerName||'?')}${assist}
+      </td></tr>`;
+    }
+  }
+
+  document.getElementById('resultsTable').innerHTML = html;
   document.getElementById('rematchBtn').style.display = localState.isHost ? 'block' : 'none';
   document.getElementById('endgame').classList.add('show');
 }
