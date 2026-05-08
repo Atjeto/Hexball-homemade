@@ -229,25 +229,67 @@
     flex-shrink: 0;
   }
 
-  .canvas-wrap { flex: 1 1 auto; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0; }
+  /* ---------- GAME BODY (canvas + controls) ---------- */
+  /* Default: portrait phone — controls in a strip below the canvas. */
+  .game-body {
+    flex: 1 1 auto; min-height: 0;
+    display: grid;
+    grid-template-rows: 1fr auto;
+    grid-template-columns: minmax(110px, 1fr) 2fr;
+    grid-template-areas:
+      "canvas canvas"
+      "move actions";
+    gap: 6px;
+    padding: 6px max(env(safe-area-inset-left), 6px) max(env(safe-area-inset-bottom), 6px) max(env(safe-area-inset-right), 6px);
+  }
+  .canvas-wrap { grid-area: canvas; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0; }
   canvas { display: block; background: var(--canvas-bg); touch-action: none; }
 
-  /* Touch controls bar — fixed-height row UNDER the canvas, never overlaps the playfield */
-  .touch-controls {
-    flex: 0 0 auto;
-    display: flex; gap: 10px;
-    padding: 10px max(env(safe-area-inset-left), 12px) max(env(safe-area-inset-bottom), 10px) max(env(safe-area-inset-right), 12px);
-    height: 88px;
-    background: var(--bg);
-    border-top: 1px solid var(--line);
-  }
-  .touch-controls .move-hint {
-    flex: 1.4; display: flex; align-items: center; justify-content: center;
-    font-family: 'Space Mono', monospace; font-size: 10px; letter-spacing: 0.25em;
-    color: var(--muted);
-    border: 1px dashed var(--line);
+  /* MOVE PAD — visible joystick that lives outside the field */
+  .move-pad {
+    grid-area: move;
+    height: 110px;
+    position: relative;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: center;
+    touch-action: none;
     user-select: none; -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    overflow: hidden;
+  }
+  .move-pad .mp-ring {
+    width: 78px; height: 78px;
+    border: 2px solid var(--line);
+    border-radius: 50%;
     pointer-events: none;
+  }
+  .move-pad .mp-knob {
+    position: absolute;
+    width: 36px; height: 36px;
+    background: var(--accent);
+    border: 2px solid rgba(255,255,255,0.6);
+    border-radius: 50%;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    left: 50%; top: 50%;
+    transition: opacity 0.12s, background 0.12s;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+  }
+  .move-pad.idle .mp-knob { opacity: 0.55; }
+  .move-pad .mp-label {
+    position: absolute; top: 6px; left: 8px;
+    font-family: 'Space Mono', monospace;
+    font-size: 9px; letter-spacing: 0.3em;
+    color: var(--muted);
+    pointer-events: none;
+  }
+
+  /* ACTION BUTTONS (boost + kick) */
+  .action-buttons {
+    grid-area: actions;
+    height: 110px;
+    display: flex; gap: 8px;
   }
   .touch-btn {
     flex: 1;
@@ -274,7 +316,30 @@
     background: var(--accent); opacity: 0.18;
     pointer-events: none;
   }
-  body.pc-mode .touch-controls { display: none; }
+
+  /* Landscape phone (or any short-and-wide window): side panels flank the canvas */
+  @media (orientation: landscape) and (max-height: 700px) {
+    .game-body {
+      grid-template-rows: 1fr;
+      grid-template-columns: 110px 1fr 110px;
+      grid-template-areas: "move canvas actions";
+    }
+    .move-pad { height: 100%; }
+    .action-buttons {
+      flex-direction: column;
+      height: 100%;
+    }
+  }
+
+  /* PC mode: hide on-screen controls entirely; canvas takes full space */
+  body.pc-mode .game-body {
+    grid-template-rows: 1fr;
+    grid-template-columns: 1fr;
+    grid-template-areas: "canvas";
+    padding: 6px;
+  }
+  body.pc-mode .move-pad,
+  body.pc-mode .action-buttons { display: none; }
 
   .flash { position: absolute; inset: 0; background: var(--accent); opacity: 0; pointer-events: none; z-index: 8; }
   .flash.show { animation: flashAnim 0.6s ease-out; }
@@ -757,35 +822,42 @@
       <button class="hud-back" id="exitBtn2">EXIT</button>
     </div>
 
-    <div class="canvas-wrap" id="canvasWrap">
-      <canvas id="canvas"></canvas>
-      <div class="flash" id="flash"></div>
-      <div class="goal-text" id="goalText">GOAL</div>
-      <div class="scorer-banner" id="scorerBanner" style="display:none;"></div>
-      <div class="kickoff-overlay" id="kickoffOverlay" style="display:none;"><div class="kickoff-num" id="kickoffNum">3</div></div>
-      <div class="key-legend" id="keyLegend" style="display:none;">
-        <kbd>WASD</kbd>/<kbd>↑↓←→</kbd> MOVE · <kbd>SPACE</kbd> KICK · <kbd>SHIFT</kbd> BOOST · <kbd>T</kbd> CHAT
+    <div class="game-body" id="gameBody">
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="canvas"></canvas>
+        <div class="flash" id="flash"></div>
+        <div class="goal-text" id="goalText">GOAL</div>
+        <div class="scorer-banner" id="scorerBanner" style="display:none;"></div>
+        <div class="kickoff-overlay" id="kickoffOverlay" style="display:none;"><div class="kickoff-num" id="kickoffNum">3</div></div>
+        <div class="key-legend" id="keyLegend" style="display:none;">
+          <kbd>WASD</kbd>/<kbd>↑↓←→</kbd> MOVE · <kbd>SPACE</kbd> KICK · <kbd>SHIFT</kbd> BOOST · <kbd>T</kbd> CHAT
+        </div>
+        <div class="game-chat" id="gameChat"></div>
+        <button class="chat-fab" id="chatFab" aria-label="open chat">💬</button>
+        <button class="roster-fab" id="rosterFab" aria-label="show roster" title="show roster">👥</button>
+        <div class="roster-popup" id="rosterPopup"></div>
+        <div class="game-quick-chats hidden" id="gameQuickChats">
+          <button class="quick-chat" data-msg="gg">GG</button>
+          <button class="quick-chat" data-msg="nice!">NICE!</button>
+          <button class="quick-chat" data-msg="my bad">MY BAD</button>
+          <button class="quick-chat" data-msg="lol">LOL</button>
+        </div>
+        <div class="game-chat-input-wrap" id="gameChatInputWrap">
+          <input type="text" id="gameChatInput" maxlength="200" placeholder="Press Enter to send · Esc to close" />
+          <button id="gameChatSend">SEND</button>
+        </div>
       </div>
-      <div class="game-chat" id="gameChat"></div>
-      <button class="chat-fab" id="chatFab" aria-label="open chat">💬</button>
-      <button class="roster-fab" id="rosterFab" aria-label="show roster" title="show roster">👥</button>
-      <div class="roster-popup" id="rosterPopup"></div>
-      <div class="game-quick-chats hidden" id="gameQuickChats">
-        <button class="quick-chat" data-msg="gg">GG</button>
-        <button class="quick-chat" data-msg="nice!">NICE!</button>
-        <button class="quick-chat" data-msg="my bad">MY BAD</button>
-        <button class="quick-chat" data-msg="lol">LOL</button>
-      </div>
-      <div class="game-chat-input-wrap" id="gameChatInputWrap">
-        <input type="text" id="gameChatInput" maxlength="200" placeholder="Press Enter to send · Esc to close" />
-        <button id="gameChatSend">SEND</button>
-      </div>
-    </div>
 
-    <div class="touch-controls" id="touchControls">
-      <div class="move-hint">DRAG ON FIELD ↑→↓← TO MOVE</div>
-      <button class="touch-btn boost" id="boostBtn">BOOST<span class="boost-fill" id="boostFill"></span></button>
-      <button class="touch-btn kick" id="kickBtn">KICK</button>
+      <div class="move-pad idle" id="movePad" aria-label="movement">
+        <div class="mp-ring"></div>
+        <div class="mp-knob" id="mpKnob"></div>
+        <span class="mp-label">MOVE</span>
+      </div>
+
+      <div class="action-buttons" id="actionButtons">
+        <button class="touch-btn boost" id="boostBtn">BOOST<span class="boost-fill" id="boostFill"></span></button>
+        <button class="touch-btn kick" id="kickBtn">KICK</button>
+      </div>
     </div>
 
     <div class="endgame" id="endgame">
@@ -1482,7 +1554,7 @@ function onGameStart() {
     if (localState.pcMode || matchMedia('(pointer:fine)').matches) {
       addToast('🎮 WASD or arrows to move · SPACE to kick · SHIFT to boost');
     } else {
-      addToast('🎮 Drag on field to move · KICK / BOOST buttons below');
+      addToast('🎮 Drag the MOVE pad · tap KICK / BOOST');
     }
     try { sessionStorage.setItem('hb-controls-shown', '1'); } catch(e){}
   }
@@ -1518,77 +1590,87 @@ function getCanvasPoint(cx, cy) {
 }
 function inCircle(x, y, cx, cy, r) { return (x-cx)**2 + (y-cy)**2 <= r*r; }
 
-// Movement is captured anywhere on the canvas (drag-based virtual stick, no visual).
-// Kick and boost are now off-canvas HTML buttons (see #kickBtn/#boostBtn) so they
-// never overlap the playfield.
-canvas.addEventListener('touchstart', e => {
-  for (const t of e.changedTouches) {
-    const p = getCanvasPoint(t.clientX, t.clientY);
-    if (p.x < 0 || p.y < 0 || p.x > displayW || p.y > displayH) continue;
-    if (ctrl.joyTouchId === null) {
-      ctrl.joyTouchId = t.identifier;
-      ctrl.joyActive = true;
-      ctrl.joyOriginX = p.x; ctrl.joyOriginY = p.y;
-      ctrl.joyStickX = p.x; ctrl.joyStickY = p.y;
-    }
-  }
-  e.preventDefault();
-}, { passive: false });
+// Movement input lives in a dedicated MOVE PAD off the canvas. The canvas itself
+// no longer captures movement so the field is always a clean view-only surface.
+const movePad = document.getElementById('movePad');
+const mpKnob = document.getElementById('mpKnob');
+const mpDrag = { active: false, originX: 0, originY: 0, touchId: null };
 
-canvas.addEventListener('touchmove', e => {
-  for (const t of e.changedTouches) {
-    if (t.identifier === ctrl.joyTouchId) {
-      const p = getCanvasPoint(t.clientX, t.clientY);
-      let dx = p.x - ctrl.joyOriginX, dy = p.y - ctrl.joyOriginY;
-      const d = Math.hypot(dx, dy);
-      if (d > JOY_RADIUS_DISPLAY) { dx = dx/d*JOY_RADIUS_DISPLAY; dy = dy/d*JOY_RADIUS_DISPLAY; }
-      ctrl.joyStickX = ctrl.joyOriginX + dx;
-      ctrl.joyStickY = ctrl.joyOriginY + dy;
-      if (d > 8) {
-        const norm = Math.max(d, JOY_RADIUS_DISPLAY);
-        let ix = (p.x - ctrl.joyOriginX) / norm, iy = (p.y - ctrl.joyOriginY) / norm;
-        const m = Math.hypot(ix, iy);
-        if (m > 1) { ix /= m; iy /= m; }
-        input.ax = ix; input.ay = iy;
-      } else { input.ax = 0; input.ay = 0; }
-    }
-  }
-  e.preventDefault();
-}, { passive: false });
-
-function endTouch(t) {
-  if (t.identifier === ctrl.joyTouchId) { ctrl.joyTouchId = null; ctrl.joyActive = false; input.ax = 0; input.ay = 0; }
+function mpStart(clientX, clientY, touchId) {
+  const rect = movePad.getBoundingClientRect();
+  // Origin = center of pad (so the knob always returns to center after release)
+  mpDrag.originX = rect.left + rect.width / 2;
+  mpDrag.originY = rect.top + rect.height / 2;
+  mpDrag.touchId = touchId;
+  mpDrag.active = true;
+  movePad.classList.remove('idle');
+  mpUpdate(clientX, clientY);
 }
-canvas.addEventListener('touchend', e => { for (const t of e.changedTouches) endTouch(t); e.preventDefault(); }, { passive: false });
-canvas.addEventListener('touchcancel', e => { for (const t of e.changedTouches) endTouch(t); }, { passive: false });
 
-// Mouse fallback for desktop without keyboard (also fine on PC, harmless because PC mode hides this anyway)
-let mouseDown = false;
-canvas.addEventListener('mousedown', e => {
-  const p = getCanvasPoint(e.clientX, e.clientY);
-  ctrl.joyActive = true;
-  ctrl.joyOriginX = p.x; ctrl.joyOriginY = p.y;
-  ctrl.joyStickX = p.x; ctrl.joyStickY = p.y;
-  mouseDown = true;
+function mpUpdate(clientX, clientY) {
+  const rect = movePad.getBoundingClientRect();
+  // Travel radius: 35% of the pad's smaller dimension.
+  const radius = Math.max(28, Math.min(rect.width, rect.height) * 0.35);
+  let dx = clientX - mpDrag.originX;
+  let dy = clientY - mpDrag.originY;
+  const d = Math.hypot(dx, dy);
+  if (d > radius) { dx = dx / d * radius; dy = dy / d * radius; }
+  // Position the knob in pad-local coordinates (so we don't depend on grid layout)
+  const localX = (mpDrag.originX - rect.left) + dx;
+  const localY = (mpDrag.originY - rect.top) + dy;
+  mpKnob.style.left = localX + 'px';
+  mpKnob.style.top = localY + 'px';
+  if (d > 6) {
+    let ix = dx / radius, iy = dy / radius;
+    const m = Math.hypot(ix, iy);
+    if (m > 1) { ix /= m; iy /= m; }
+    input.ax = ix; input.ay = iy;
+  } else {
+    input.ax = 0; input.ay = 0;
+  }
+}
+
+function mpEnd() {
+  mpDrag.active = false;
+  mpDrag.touchId = null;
+  input.ax = 0; input.ay = 0;
+  movePad.classList.add('idle');
+  mpKnob.style.left = '50%';
+  mpKnob.style.top = '50%';
+}
+
+movePad.addEventListener('touchstart', e => {
+  if (mpDrag.active) return;
+  const t = e.changedTouches[0];
+  mpStart(t.clientX, t.clientY, t.identifier);
+  e.preventDefault();
+}, { passive: false });
+movePad.addEventListener('touchmove', e => {
+  if (!mpDrag.active) return;
+  for (const t of e.changedTouches) {
+    if (t.identifier === mpDrag.touchId) { mpUpdate(t.clientX, t.clientY); break; }
+  }
+  e.preventDefault();
+}, { passive: false });
+function mpHandleEndEvent(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === mpDrag.touchId) { mpEnd(); break; }
+  }
+  e.preventDefault();
+}
+movePad.addEventListener('touchend', mpHandleEndEvent, { passive: false });
+movePad.addEventListener('touchcancel', mpHandleEndEvent, { passive: false });
+
+// Mouse fallback (non-PC desktop / touch-laptops with mouse)
+movePad.addEventListener('mousedown', e => {
+  mpStart(e.clientX, e.clientY, null);
+  e.preventDefault();
 });
 window.addEventListener('mousemove', e => {
-  if (!mouseDown) return;
-  const p = getCanvasPoint(e.clientX, e.clientY);
-  let dx = p.x - ctrl.joyOriginX, dy = p.y - ctrl.joyOriginY;
-  const d = Math.hypot(dx, dy);
-  if (d > JOY_RADIUS_DISPLAY) { dx = dx/d*JOY_RADIUS_DISPLAY; dy = dy/d*JOY_RADIUS_DISPLAY; }
-  ctrl.joyStickX = ctrl.joyOriginX + dx;
-  ctrl.joyStickY = ctrl.joyOriginY + dy;
-  if (d > 8) {
-    const norm = Math.max(d, JOY_RADIUS_DISPLAY);
-    let ix = (p.x - ctrl.joyOriginX) / norm, iy = (p.y - ctrl.joyOriginY) / norm;
-    const m = Math.hypot(ix, iy); if (m > 1) { ix /= m; iy /= m; }
-    input.ax = ix; input.ay = iy;
-  } else { input.ax = 0; input.ay = 0; }
+  if (mpDrag.active && mpDrag.touchId === null) mpUpdate(e.clientX, e.clientY);
 });
 window.addEventListener('mouseup', () => {
-  if (mouseDown) { ctrl.joyActive = false; input.ax = 0; input.ay = 0; }
-  mouseDown = false;
+  if (mpDrag.active && mpDrag.touchId === null) mpEnd();
 });
 
 // HTML touch buttons for kick and boost (they sit BELOW the canvas)
