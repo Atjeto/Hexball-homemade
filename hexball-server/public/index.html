@@ -378,6 +378,39 @@
   }
   body.pc-mode .chat-fab { display: none; }
 
+  /* Quick-chat presets */
+  .quick-chats {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    margin-top: 6px;
+  }
+  .quick-chat {
+    flex: 1; min-width: 60px;
+    background: transparent; border: 1px solid var(--line);
+    color: var(--ink); padding: 6px 8px;
+    font-family: 'Space Mono', monospace; font-size: 10px; letter-spacing: 0.18em;
+    cursor: pointer; font-weight: 700;
+    transition: all 0.1s;
+  }
+  .quick-chat:hover { border-color: var(--accent); color: var(--accent); }
+  .quick-chat:active { transform: scale(0.96); }
+
+  .game-quick-chats {
+    position: absolute; left: 8px; right: 8px; bottom: 8px;
+    display: flex; gap: 6px;
+    z-index: 8;
+    pointer-events: auto;
+  }
+  .game-quick-chats .quick-chat {
+    flex: 1;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    border-color: rgba(255,255,255,0.25);
+    font-size: 10px;
+    padding: 8px 4px;
+  }
+  .game-quick-chats .quick-chat:hover { color: var(--accent); }
+  .game-quick-chats.hidden { display: none; }
+
   /* In-game roster (small button + popup) */
   .roster-fab {
     position: absolute; top: 96px; right: 8px;
@@ -689,6 +722,13 @@
         <input type="text" id="lobbyChatInput" class="chat-input" placeholder="Say something…" maxlength="200" />
         <button class="chat-send" id="lobbyChatSend">SEND</button>
       </div>
+      <div class="quick-chats" id="lobbyQuickChats">
+        <button class="quick-chat" data-msg="gg">GG</button>
+        <button class="quick-chat" data-msg="nice!">NICE!</button>
+        <button class="quick-chat" data-msg="wp">WP</button>
+        <button class="quick-chat" data-msg="ready?">READY?</button>
+        <button class="quick-chat" data-msg="lol">LOL</button>
+      </div>
     </div>
   </div>
 
@@ -722,6 +762,12 @@
       <button class="chat-fab" id="chatFab" aria-label="open chat">💬</button>
       <button class="roster-fab" id="rosterFab" aria-label="show roster" title="show roster">👥</button>
       <div class="roster-popup" id="rosterPopup"></div>
+      <div class="game-quick-chats hidden" id="gameQuickChats">
+        <button class="quick-chat" data-msg="gg">GG</button>
+        <button class="quick-chat" data-msg="nice!">NICE!</button>
+        <button class="quick-chat" data-msg="my bad">MY BAD</button>
+        <button class="quick-chat" data-msg="lol">LOL</button>
+      </div>
       <div class="game-chat-input-wrap" id="gameChatInputWrap">
         <input type="text" id="gameChatInput" maxlength="200" placeholder="Press Enter to send · Esc to close" />
         <button id="gameChatSend">SEND</button>
@@ -2143,6 +2189,27 @@ function closeGameChat() {
 }
 document.getElementById('chatFab').addEventListener('click', () => {
   if (gameChatInputWrap.classList.contains('show')) closeGameChat(); else openGameChat();
+});
+
+// Long-press on the chat-FAB toggles quick-chat panel (also: simple double-tap)
+let chatFabPressTimer = null;
+document.getElementById('chatFab').addEventListener('contextmenu', e => { e.preventDefault(); toggleGameQuickChats(); });
+document.getElementById('chatFab').addEventListener('touchstart', () => {
+  chatFabPressTimer = setTimeout(() => { toggleGameQuickChats(); chatFabPressTimer = null; }, 450);
+}, { passive: true });
+document.getElementById('chatFab').addEventListener('touchend', () => {
+  if (chatFabPressTimer) { clearTimeout(chatFabPressTimer); chatFabPressTimer = null; }
+});
+function toggleGameQuickChats() {
+  document.getElementById('gameQuickChats').classList.toggle('hidden');
+}
+
+// Bind every .quick-chat button (lobby + game) to send its preset
+document.querySelectorAll('.quick-chat').forEach(btn => {
+  btn.addEventListener('click', () => {
+    sendChat(btn.dataset.msg);
+    audio.play('click');
+  });
 });
 document.getElementById('gameChatSend').addEventListener('click', () => {
   sendChat(gameChatInput.value);
