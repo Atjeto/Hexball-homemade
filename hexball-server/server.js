@@ -82,6 +82,7 @@ class Room {
       arena: opts.arena || 'classic',
       goalsToWin: opts.goalsToWin || 3,
       timeLimit: opts.timeLimit || 0, // seconds; 0 = first-to-goalsToWin
+      botDifficulty: opts.botDifficulty || 'normal', // easy | normal | hard
     };
     this.scoreRed = 0;
     this.scoreBlue = 0;
@@ -188,42 +189,50 @@ class Room {
     const arena = arenas[this.matchOpts.arena];
     const W = arena.w, H = arena.h;
     const ball = this.matchBall;
+    const diff = this.matchOpts.botDifficulty || 'normal';
+    // Difficulty profile:
+    //   reactionSkip — fraction of ticks the bot keeps last input (slower reaction)
+    //   leadFactor   — how much to anticipate ball.vx/.vy (predictive vs reactive)
+    //   jitterAmp    — random wobble added to steering
+    //   kickRange    — distance at which they hold KICK
+    //   boostThresh  — boost only if target distance > this
+    const PROF = {
+      easy:   { reactionSkip: 0.45, leadFactor: 0,    jitterAmp: 0.30, kickRange: 36, boostThresh: 320 },
+      normal: { reactionSkip: 0.10, leadFactor: 4,    jitterAmp: 0.15, kickRange: 42, boostThresh: 220 },
+      hard:   { reactionSkip: 0.00, leadFactor: 9,    jitterAmp: 0.05, kickRange: 50, boostThresh: 140 },
+    }[diff] || { reactionSkip: 0.10, leadFactor: 4, jitterAmp: 0.15, kickRange: 42, boostThresh: 220 };
+
     for (const p of this.players.values()) {
       if (!p.isBot) continue;
-      // Where do we attack?
+      if (Math.random() < PROF.reactionSkip) continue; // keep last frame's input
+
       const targetGoalY = p.team === 'red' ? 0 : H;
       const ourGoalY = p.team === 'red' ? H : 0;
-      const dxBall = ball.x - p.x, dyBall = ball.y - p.y;
+      // Predict ball position a few ticks ahead based on its velocity.
+      const predX = ball.x + (ball.vx || 0) * PROF.leadFactor;
+      const predY = ball.y + (ball.vy || 0) * PROF.leadFactor;
+      const dxBall = predX - p.x, dyBall = predY - p.y;
       const dBall = Math.hypot(dxBall, dyBall) || 1;
       let tx, ty;
-      // Defend: ball is on our half + heading toward our goal
       const onOurHalf = (p.team === 'red') ? ball.y > H * 0.5 : ball.y < H * 0.5;
       const ballHeadingHome = (p.team === 'red' ? ball.vy > 0.5 : ball.vy < -0.5);
       if (onOurHalf && ballHeadingHome && dBall > 60) {
-        // Slot in between ball and our goal
         tx = ball.x + (ourGoalY - ball.y) * 0.05;
         ty = ball.y + Math.sign(ourGoalY - ball.y) * 50;
       } else if (dBall < 80) {
-        // Position to push ball toward target goal:
-        // Stand on the OPPOSITE side of the ball relative to the target goal.
         const sign = Math.sign(ball.y - targetGoalY) || 1;
-        tx = ball.x;
-        ty = ball.y + sign * 24;
+        tx = predX;
+        ty = predY + sign * 24;
       } else {
-        // Chase ball
-        tx = ball.x; ty = ball.y;
+        tx = predX; ty = predY;
       }
       const dx = tx - p.x, dy = ty - p.y;
       const d = Math.hypot(dx, dy) || 1;
-      // Add a bit of randomness/jitter so bots don't perfectly stack
-      const jitter = (Math.sin((Date.now() / 800) + p.x * 0.01) * 0.15);
+      const jitter = Math.sin((Date.now() / 800) + p.x * 0.01) * PROF.jitterAmp;
       p.input.ax = clamp(dx / d + jitter, -1, 1);
       p.input.ay = clamp(dy / d, -1, 1);
-      // Kick when close
-      p.input.kicking = dBall < 42;
-      // Boost when far AND we have boost
-      p.input.boosting = (d > 220 && p.boost > 35);
-      // Don't drive into our own goal area aimlessly
+      p.input.kicking = dBall < PROF.kickRange;
+      p.input.boosting = (d > PROF.boostThresh && p.boost > 35);
       if (Math.abs(p.y - ourGoalY) < 60 && Math.abs(ball.y - ourGoalY) > 200) {
         p.input.ay = (ourGoalY === 0) ? 0.5 : -0.5;
       }
@@ -1057,6 +1066,9 @@ wss.on('connection', (ws) => {
           if (msg.matchOpts.arena && arenas[msg.matchOpts.arena]) currentRoom.matchOpts.arena = msg.matchOpts.arena;
           if (msg.matchOpts.goalsToWin) currentRoom.matchOpts.goalsToWin = clamp(parseInt(msg.matchOpts.goalsToWin), 1, 20);
           if (msg.matchOpts.timeLimit !== undefined) currentRoom.matchOpts.timeLimit = clamp(parseInt(msg.matchOpts.timeLimit) || 0, 0, 1800);
+          if (msg.matchOpts.botDifficulty && ['easy','normal','hard'].includes(msg.matchOpts.botDifficulty)) {
+            currentRoom.matchOpts.botDifficulty = msg.matchOpts.botDifficulty;
+          }
         }
         if (currentRoom.mode === 'golf' && msg.golfOpts) {
           if (msg.golfOpts.courseLength) currentRoom.golfOpts.courseLength = clamp(parseInt(msg.golfOpts.courseLength), 1, courses.length);

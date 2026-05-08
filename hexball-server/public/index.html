@@ -693,6 +693,12 @@
           <button class="opt" data-time="300">5 min</button>
           <button class="opt" data-time="420">7 min</button>
         </div>
+        <div class="label">Bot Difficulty</div>
+        <div class="options three" id="botDiffOpts">
+          <button class="opt" data-diff="easy">Easy</button>
+          <button class="opt active" data-diff="normal">Normal</button>
+          <button class="opt" data-diff="hard">Hard</button>
+        </div>
       </div>
       <div id="golfOpts" style="display:none;">
         <div class="label">Course Length</div>
@@ -941,7 +947,7 @@ const localState = {
   selectedMode: 'match',
   roomCode: null,
   isHost: false,
-  matchOpts: { arena: 'classic', goalsToWin: 3, timeLimit: 0 },
+  matchOpts: { arena: 'classic', goalsToWin: 3, timeLimit: 0, botDifficulty: 'normal' },
   golfOpts: { courseLength: 6 },
   // server-pushed state
   game: {
@@ -1244,6 +1250,7 @@ function bindOptGroup(id, key, attr, scope, parser = v => v) {
 bindOptGroup('arenaOpts', 'arena', 'arena', 'matchOpts');
 bindOptGroup('goalsOpts', 'goalsToWin', 'goals', 'matchOpts', v => parseInt(v, 10));
 bindOptGroup('timeOpts', 'timeLimit', 'time', 'matchOpts', v => parseInt(v, 10));
+bindOptGroup('botDiffOpts', 'botDifficulty', 'diff', 'matchOpts');
 bindOptGroup('courseOpts', 'courseLength', 'course', 'golfOpts', v => parseInt(v, 10));
 
 function updateLobby(msg) {
@@ -1277,6 +1284,7 @@ function updateLobby(msg) {
     document.querySelectorAll('#arenaOpts .opt').forEach(b => b.classList.toggle('active', b.dataset.arena === msg.matchOpts.arena));
     document.querySelectorAll('#goalsOpts .opt').forEach(b => b.classList.toggle('active', parseInt(b.dataset.goals) === msg.matchOpts.goalsToWin));
     document.querySelectorAll('#timeOpts .opt').forEach(b => b.classList.toggle('active', parseInt(b.dataset.time) === (msg.matchOpts.timeLimit||0)));
+    document.querySelectorAll('#botDiffOpts .opt').forEach(b => b.classList.toggle('active', b.dataset.diff === (msg.matchOpts.botDifficulty||'normal')));
   } else {
     document.querySelectorAll('#courseOpts .opt').forEach(b => b.classList.toggle('active', parseInt(b.dataset.course) === msg.golfOpts.courseLength));
   }
