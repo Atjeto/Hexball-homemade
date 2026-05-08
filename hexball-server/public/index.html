@@ -1594,34 +1594,8 @@ function onGameStart() {
 }
 
 // ============== INPUT ==============
+// Single shared input object that the move pad / keyboard / mouse all write into.
 const input = { ax: 0, ay: 0, kicking: false, boosting: false };
-let ctrl = {
-  joyHintX: 0, joyHintY: 0,
-  joyOriginX: 0, joyOriginY: 0,
-  joyStickX: 0, joyStickY: 0,
-  joyActive: false, joyTouchId: null,
-  kickX: 0, kickY: 0, kickR: 44,
-  boostX: 0, boostY: 0, boostR: 30,
-  kickTouchId: null, boostTouchId: null,
-  kickPressed: false, boostPressed: false,
-};
-const JOY_RADIUS_DISPLAY = 48;
-const JOY_HINT_R = 38;
-
-function recomputeControlGeometry() {
-  const margin = Math.max(20, Math.min(displayW, displayH) * 0.05);
-  ctrl.kickX = displayW - margin - ctrl.kickR;
-  ctrl.kickY = displayH - margin - ctrl.kickR;
-  ctrl.boostX = ctrl.kickX - ctrl.kickR - ctrl.boostR - 12;
-  ctrl.boostY = ctrl.kickY - ctrl.kickR - ctrl.boostR + 8;
-  ctrl.joyHintX = margin + JOY_HINT_R;
-  ctrl.joyHintY = displayH - margin - JOY_HINT_R;
-}
-function getCanvasPoint(cx, cy) {
-  const rect = canvas.getBoundingClientRect();
-  return { x: cx - rect.left, y: cy - rect.top };
-}
-function inCircle(x, y, cx, cy, r) { return (x-cx)**2 + (y-cy)**2 <= r*r; }
 
 // Movement input lives in a dedicated MOVE PAD off the canvas. The canvas itself
 // no longer captures movement so the field is always a clean view-only surface.
@@ -1721,8 +1695,8 @@ function bindTouchBtn(btn, onState) {
   // Prevent page scroll/text-select shenanigans
   btn.addEventListener('contextmenu', e => e.preventDefault());
 }
-bindTouchBtn(document.getElementById('kickBtn'), down => { input.kicking = down; ctrl.kickPressed = down; });
-bindTouchBtn(document.getElementById('boostBtn'), down => { input.boosting = down; ctrl.boostPressed = down; });
+bindTouchBtn(document.getElementById('kickBtn'), down => { input.kicking = down; });
+bindTouchBtn(document.getElementById('boostBtn'), down => { input.boosting = down; });
 
 // ---- Keyboard (PC) ----
 const keysHeld = new Set();
@@ -1747,9 +1721,6 @@ function enterPCMode() {
   if (localState.pcMode) return;
   localState.pcMode = true;
   document.body.classList.add('pc-mode');
-  // Hide on-screen joystick state
-  ctrl.joyActive = false;
-  ctrl.kickPressed = false; ctrl.boostPressed = false;
   // Show key legend if game is active
   if (document.getElementById('gameScreen').classList.contains('active')) {
     document.getElementById('keyLegend').style.display = 'block';
