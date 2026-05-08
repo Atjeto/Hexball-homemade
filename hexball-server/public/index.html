@@ -938,6 +938,15 @@ muteToggle.addEventListener('click', () => {
 // Resume on first interaction (browser autoplay policy)
 ['pointerdown','keydown','touchstart'].forEach(ev => window.addEventListener(ev, () => audio.resume(), { once: true, passive: true }));
 
+// Subtle click sound on primary UI buttons (skip touch buttons that already have feedback)
+document.addEventListener('click', e => {
+  const t = e.target;
+  if (!(t instanceof HTMLElement)) return;
+  if (t.closest('.btn-primary, .btn-secondary, .opt, .icon-btn, .mode-card, .copy-btn, .hud-back')) {
+    audio.play('click');
+  }
+});
+
 // ============== STATE ==============
 const localState = {
   ws: null,
@@ -1985,8 +1994,11 @@ function drawPlayer(x, y, r, color, boosting, isMe, name) {
   if (name) {
     ctx.font = 'bold 11px "Space Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillText(name, x+1, y - r - 6 + 1);
+    // 1px outline for legibility regardless of background
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    ctx.strokeText(name, x, y - r - 6);
     ctx.fillStyle = '#fff';
     ctx.fillText(name, x, y - r - 6);
     ctx.textAlign = 'left';
@@ -1994,6 +2006,21 @@ function drawPlayer(x, y, r, color, boosting, isMe, name) {
 }
 
 function drawBall(x, y, r, ownerColor, isMine) {
+  // Speed-based glow: estimate speed from interpolation snapshots when available.
+  let speed = 0;
+  const snap = localState.snap;
+  if (snap.curr && snap.curr.ball && snap.prev && snap.prev.ball) {
+    const dt = Math.max(1, snap.currTime - snap.prevTime);
+    speed = Math.hypot(snap.curr.ball.x - snap.prev.ball.x, snap.curr.ball.y - snap.prev.ball.y) * 1000 / dt;
+  }
+  if (speed > 250) {
+    const t = Math.min(1, (speed - 250) / 600);
+    ctx.save();
+    ctx.globalAlpha = 0.18 + 0.35 * t;
+    ctx.fillStyle = theme.accent;
+    ctx.beginPath(); ctx.arc(x, y, r + 6 + 6 * t, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
   ctx.fillStyle = '#fff';
   ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
   ctx.strokeStyle = ownerColor || theme.ink;
