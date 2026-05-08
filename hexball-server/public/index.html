@@ -966,6 +966,7 @@ const localState = {
   pcMode: false,    // becomes true on first keyboard event
   ballTrail: [],    // cached ball positions for trail effect
   kickFlash: null,  // {x, y, t0} for brief impact ring
+  particles: [],    // confetti / spark particles in arena coords
   myMatchTeam: null, // last known own team for end-screen W/L tagging
 };
 const TICK_MS_CLIENT = 1000 / 30;
@@ -1091,6 +1092,7 @@ function handleMessage(msg) {
       audio.play('whistle');
       setTimeout(() => audio.play('goal'), 250);
       shakeCanvas();
+      spawnGoalConfetti(msg.scorer);
       if (navigator.vibrate) navigator.vibrate([60, 80, 120]);
       break;
     case 'splash':
@@ -1837,6 +1839,9 @@ function drawMatch() {
   // Kick flash ring
   drawKickFlash();
 
+  // Confetti particles (drawn last so they sit on top)
+  updateAndDrawParticles();
+
   ctx.restore();
 }
 
@@ -2111,6 +2116,53 @@ function updateKickoffOverlay() {
       overlay.style.display = 'none';
     }
   }
+}
+
+// Goal confetti — colorful particles falling from the top of the field.
+// Coordinates are arena-space; rendered inside drawMatch's transform.
+function spawnGoalConfetti(scorer) {
+  const a = arenas[localState.game.arena] || arenas.classic;
+  const palette = scorer === 'red'
+    ? ['#e54b4b', '#ff7171', '#f5a623', '#ffd166']
+    : ['#4b8bf5', '#6cb1ff', '#3acac4', '#aae3ff'];
+  const COUNT = 70;
+  for (let i = 0; i < COUNT; i++) {
+    localState.particles.push({
+      x: Math.random() * a.w,
+      y: -10 - Math.random() * 30,
+      vx: (Math.random() - 0.5) * 4,
+      vy: 1 + Math.random() * 3,
+      ay: 0.06 + Math.random() * 0.06,
+      r: 3 + Math.random() * 4,
+      color: palette[i % palette.length],
+      rot: Math.random() * Math.PI * 2,
+      vrot: (Math.random() - 0.5) * 0.3,
+      life: 1.0,
+      decay: 0.0035 + Math.random() * 0.003,
+    });
+  }
+  // Cap to avoid runaway memory
+  if (localState.particles.length > 400) localState.particles.splice(0, localState.particles.length - 400);
+}
+
+function updateAndDrawParticles() {
+  const ps = localState.particles;
+  if (!ps.length) return;
+  for (let i = ps.length - 1; i >= 0; i--) {
+    const p = ps[i];
+    p.vy += p.ay;
+    p.x += p.vx; p.y += p.vy;
+    p.rot += p.vrot;
+    p.life -= p.decay;
+    if (p.life <= 0) { ps.splice(i, 1); continue; }
+    ctx.save();
+    ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(-p.r * 0.6, -p.r * 0.4, p.r * 1.2, p.r * 0.8);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
 }
 
 // Camera shake for celebration moments (CSS keyframe applied to canvas-wrap).
