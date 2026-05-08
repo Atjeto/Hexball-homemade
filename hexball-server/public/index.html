@@ -1183,10 +1183,14 @@ function handleMessage(msg) {
       break;
     case 'gameStart':
       localState.game.mode = msg.mode;
-      // Reset snapshot/effects buffers for the new game
+      // Reset transient state so nothing carries over from the previous match.
       localState.snap.prev = null; localState.snap.curr = null;
       localState.ballTrail = [];
       localState.kickFlash = null;
+      localState.particles = [];
+      localState.game.extraBalls = [];
+      localState.game.scoreRed = 0;
+      localState.game.scoreBlue = 0;
       onGameStart();
       break;
     case 'state':

@@ -586,9 +586,20 @@ class Room {
     this.tickBots();
     for (const p of this.players.values()) this.updatePlayer(p, T, arena, null);
     this.updateMatchBall(T, arena);
+
+    // If the matchBall just scored, onMatchGoal set goalCelebration > 0 and
+    // queued a position reset. Don't run extra-ball physics this tick — the
+    // goal pause should freeze the entire field, not let extras keep scoring.
+    if (this.goalCelebration > 0 || this.state !== 'playing') return;
+
     // Update extra balls (multi-ball mode)
     if (this.extraBalls && this.extraBalls.length) {
-      for (const eb of this.extraBalls) this.updateExtraBall(eb, T, arena);
+      for (const eb of this.extraBalls) {
+        this.updateExtraBall(eb, T, arena);
+        // An extra-ball goal might have ended the match (final goal); bail out
+        // early instead of continuing to update other extras.
+        if (this.state !== 'playing') return;
+      }
       // Ball-ball collisions amongst all the match balls
       const all = [this.matchBall, ...this.extraBalls];
       for (let i = 0; i < all.length; i++) {
@@ -1202,10 +1213,11 @@ class Room {
       msg.timeLimit = this.matchOpts.timeLimit || 0;
       msg.ballStyle = this.matchOpts.ballStyle || 'normal';
       msg.numBalls = this.matchOpts.numBalls || 1;
-      // Multi-ball: include extra balls
-      if (this.extraBalls && this.extraBalls.length) {
-        msg.extraBalls = this.extraBalls.map(b => ({ x: Math.round(b.x*10)/10, y: Math.round(b.y*10)/10 }));
-      }
+      // Always include extraBalls (even when empty) so clients can reliably clear
+      // stale entries from a previous match that had a higher numBalls setting.
+      msg.extraBalls = (this.extraBalls || []).map(b => ({
+        x: Math.round(b.x*10)/10, y: Math.round(b.y*10)/10,
+      }));
     } else {
       msg.currentHole = this.currentHole;
       msg.totalHoles = this.golfOpts.courseLength;
