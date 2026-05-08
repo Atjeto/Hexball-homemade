@@ -16,11 +16,11 @@ const BALL_R = 14;
 const SUBSTEPS = 6;
 
 const MATCH_TUNING = {
-  fp: 0.92, fb: 0.992,
-  accel: 0.55, accelB: 0.95,    // doubled vs single-player (server is at 30Hz, not 60)
-  max: 4.5, maxB: 7.5,
-  kick: 6.5, bounce: 0.7,
-  ballBounce: 0.85, ballMax: 11,
+  fp: 0.90, fb: 0.992,           // tighter friction = less drift
+  accel: 0.70, accelB: 1.15,     // bumped to compensate for higher friction
+  max: 4.95, maxB: 8.0,
+  kick: 7.0, bounce: 0.7,
+  ballBounce: 0.85, ballMax: 11.5,
 };
 const GOLF_TUNING = {
   fp: 0.90, fb: 0.978,
@@ -78,7 +78,11 @@ class Room {
     this.lastActivity = Date.now();
 
     // Match-specific
-    this.matchOpts = { arena: opts.arena || 'classic', goalsToWin: opts.goalsToWin || 3 };
+    this.matchOpts = {
+      arena: opts.arena || 'classic',
+      goalsToWin: opts.goalsToWin || 3,
+      timeLimit: opts.timeLimit || 0, // seconds; 0 = first-to-goalsToWin
+    };
     this.scoreRed = 0;
     this.scoreBlue = 0;
     this.matchBall = null;
@@ -94,32 +98,142 @@ class Room {
     this.lastTick = Date.now();
     this.tickInterval = null;
     this.goalCelebration = 0; // ticks remaining for goal pause
+    this.kickoffCountdown = 0; // ticks remaining for "3-2-1-GO" pre-kickoff freeze
+    this.lastScorer = null; // 'red' | 'blue' | null
+    this.lastBallTouch = null; // { id, name, team } — last player to touch the match ball
+  }
+
+  uniqueName(rawName) {
+    const base = (rawName || '').toString().trim().slice(0, 20) || ('Player ' + (this.players.size + 1));
+    const taken = new Set([...this.players.values()].map(p => p.name));
+    if (!taken.has(base)) return base;
+    let n = 2;
+    while (taken.has(base + ' (' + n + ')')) n++;
+    return base + ' (' + n + ')';
+  }
+
+  pickJoinTeam() {
+    if (this.mode !== 'match') return 'self';
+    let red = 0, blue = 0;
+    for (const p of this.players.values()) {
+      if (p.team === 'red') red++;
+      else if (p.team === 'blue') blue++;
+    }
+    return red <= blue ? 'red' : 'blue';
   }
 
   addPlayer(id, ws, name) {
     const teamColor = TEAM_COLORS[this.players.size % TEAM_COLORS.length];
-    const team = this.mode === 'match' ? (this.players.size % 2 === 0 ? 'red' : 'blue') : 'self';
+    const team = this.pickJoinTeam();
     const p = {
-      id, ws, name: name || 'Player ' + (this.players.size + 1),
+      id, ws, name: this.uniqueName(name),
       team, color: teamColor,
       x: 0, y: 0, vx: 0, vy: 0, r: PLAYER_R,
       boost: 100,
       input: { ax: 0, ay: 0, kicking: false, boosting: false },
-      ball: null, // golf: each player has their own ball
+      ball: null,
       strokes: 0,
       lastKickPos: null,
       ready: false,
+      isBot: false,
     };
     this.players.set(id, p);
     return p;
+  }
+
+  addBot() {
+    if (this.mode !== 'match') return null;
+    if (this.players.size >= 6) return null;
+    const id = 'bot_' + Math.random().toString(36).slice(2, 7);
+    const team = this.pickJoinTeam();
+    const teamColor = team === 'red' ? '#e54b4b' : '#4b8bf5';
+    const names = ['Botley','Mecha','Robo','Cog','Pixel','Quark','Vector','Glitch'];
+    const baseName = '🤖 ' + names[Math.floor(Math.random() * names.length)];
+    const p = {
+      id, ws: null, name: this.uniqueName(baseName),
+      team, color: teamColor,
+      x: 0, y: 0, vx: 0, vy: 0, r: PLAYER_R,
+      boost: 100,
+      input: { ax: 0, ay: 0, kicking: false, boosting: false },
+      ball: null, strokes: 0, lastKickPos: null, ready: false,
+      isBot: true,
+    };
+    this.players.set(id, p);
+    return p;
+  }
+
+  removeBot(id) {
+    const p = this.players.get(id);
+    if (!p || !p.isBot) return false;
+    this.players.delete(id);
+    return true;
+  }
+
+  // Simple steering AI driven each tick; sets bot.input fields, server then runs
+  // updatePlayer with that input as if it came from a real client.
+  tickBots() {
+    if (this.mode !== 'match' || !this.matchBall) return;
+    const arena = arenas[this.matchOpts.arena];
+    const W = arena.w, H = arena.h;
+    const ball = this.matchBall;
+    for (const p of this.players.values()) {
+      if (!p.isBot) continue;
+      // Where do we attack?
+      const targetGoalY = p.team === 'red' ? 0 : H;
+      const ourGoalY = p.team === 'red' ? H : 0;
+      const dxBall = ball.x - p.x, dyBall = ball.y - p.y;
+      const dBall = Math.hypot(dxBall, dyBall) || 1;
+      let tx, ty;
+      // Defend: ball is on our half + heading toward our goal
+      const onOurHalf = (p.team === 'red') ? ball.y > H * 0.5 : ball.y < H * 0.5;
+      const ballHeadingHome = (p.team === 'red' ? ball.vy > 0.5 : ball.vy < -0.5);
+      if (onOurHalf && ballHeadingHome && dBall > 60) {
+        // Slot in between ball and our goal
+        tx = ball.x + (ourGoalY - ball.y) * 0.05;
+        ty = ball.y + Math.sign(ourGoalY - ball.y) * 50;
+      } else if (dBall < 80) {
+        // Position to push ball toward target goal:
+        // Stand on the OPPOSITE side of the ball relative to the target goal.
+        const sign = Math.sign(ball.y - targetGoalY) || 1;
+        tx = ball.x;
+        ty = ball.y + sign * 24;
+      } else {
+        // Chase ball
+        tx = ball.x; ty = ball.y;
+      }
+      const dx = tx - p.x, dy = ty - p.y;
+      const d = Math.hypot(dx, dy) || 1;
+      // Add a bit of randomness/jitter so bots don't perfectly stack
+      const jitter = (Math.sin((Date.now() / 800) + p.x * 0.01) * 0.15);
+      p.input.ax = clamp(dx / d + jitter, -1, 1);
+      p.input.ay = clamp(dy / d, -1, 1);
+      // Kick when close
+      p.input.kicking = dBall < 42;
+      // Boost when far AND we have boost
+      p.input.boosting = (d > 220 && p.boost > 35);
+      // Don't drive into our own goal area aimlessly
+      if (Math.abs(p.y - ourGoalY) < 60 && Math.abs(ball.y - ourGoalY) > 200) {
+        p.input.ay = (ourGoalY === 0) ? 0.5 : -0.5;
+      }
+    }
   }
 
   removePlayer(id) {
     this.players.delete(id);
     if (this.players.size === 0) return true; // room empty
     if (this.hostId === id) {
-      // promote next player as host
-      this.hostId = this.players.keys().next().value;
+      // promote next non-bot player as host (bots can't be host)
+      let chosen = null;
+      for (const p of this.players.values()) {
+        if (!p.isBot) { chosen = p.id; break; }
+      }
+      if (chosen) {
+        this.hostId = chosen;
+      } else {
+        // Only bots remain — clear the room.
+        this.players.clear();
+        return true;
+      }
     }
     return false;
   }
@@ -131,32 +245,42 @@ class Room {
     if (this.mode === 'match') this.initMatch();
     else this.initGolfHole();
     this.lastTick = Date.now();
+    if (this.tickInterval) { clearInterval(this.tickInterval); }
     this.tickInterval = setInterval(() => this.tick(), TICK_MS);
   }
 
   initMatch() {
-    const W = arenas[this.matchOpts.arena].w;
-    const H = arenas[this.matchOpts.arena].h;
-    let redCount = 0, blueCount = 0;
-    for (const p of this.players.values()) {
-      // re-balance teams
-      if (p.team === 'red') {
-        const slot = redCount++;
-        p.x = W * 0.3 + slot * 50;
-        p.y = H * 0.78;
-      } else {
-        const slot = blueCount++;
-        p.x = W * 0.3 + slot * 50;
-        p.y = H * 0.22;
-      }
-      p.vx = 0; p.vy = 0;
-      p.boost = 100;
-    }
-    this.matchBall = { x: W/2, y: H/2, vx: 0, vy: 0, r: BALL_R };
     this.scoreRed = 0;
     this.scoreBlue = 0;
     this.matchTime = 0;
     this.goalCelebration = 0;
+    this.lastScorer = null;
+    this.resetPositions();
+    this.kickoffCountdown = TICK_HZ * 3; // 3-second countdown on first kickoff
+  }
+
+  // Reset positions only (used after goals) so scores persist.
+  resetPositions() {
+    const W = arenas[this.matchOpts.arena].w;
+    const H = arenas[this.matchOpts.arena].h;
+    let redCount = 0, blueCount = 0;
+    for (const p of this.players.values()) {
+      if (p.team === 'red') {
+        const slot = redCount++;
+        p.x = W * 0.5 + (slot - 0.5) * 70;
+        p.y = H * 0.78;
+      } else {
+        const slot = blueCount++;
+        p.x = W * 0.5 + (slot - 0.5) * 70;
+        p.y = H * 0.22;
+      }
+      p.vx = 0; p.vy = 0;
+      p.boost = 100;
+      p.input.kicking = false;
+      p.input.boosting = false;
+      p.input.ax = 0; p.input.ay = 0;
+    }
+    this.matchBall = { x: W/2, y: H/2, vx: 0, vy: 0, r: BALL_R };
   }
 
   initGolfHole() {
@@ -207,6 +331,17 @@ class Room {
       return;
     }
 
+    if (this.kickoffCountdown > 0) {
+      this.kickoffCountdown--;
+      // Freeze players: zero out velocities and inputs so nothing moves during the count.
+      if (this.mode === 'match') {
+        for (const p of this.players.values()) { p.vx = 0; p.vy = 0; }
+        if (this.matchBall) { this.matchBall.vx = 0; this.matchBall.vy = 0; }
+      }
+      this.broadcastState();
+      return;
+    }
+
     if (this.mode === 'match') this.tickMatch();
     else this.tickGolf();
 
@@ -221,6 +356,7 @@ class Room {
     const T = MATCH_TUNING;
     const arena = arenas[this.matchOpts.arena];
 
+    this.tickBots();
     for (const p of this.players.values()) this.updatePlayer(p, T, arena, null);
     this.updateMatchBall(T, arena);
 
@@ -233,6 +369,9 @@ class Room {
     }
 
     this.matchTime += 1 / TICK_HZ;
+    if (this.matchOpts.timeLimit > 0 && this.matchTime >= this.matchOpts.timeLimit) {
+      this.endMatch();
+    }
   }
 
   updateMatchBall(T, arena) {
@@ -262,30 +401,46 @@ class Room {
 
   onMatchGoal(scorer) {
     if (scorer === 'red') this.scoreRed++; else this.scoreBlue++;
-    this.broadcast({ type: 'goal', scorer, scoreRed: this.scoreRed, scoreBlue: this.scoreBlue });
-    this.goalCelebration = TICK_HZ * 2; // 2 seconds pause
+    this.lastScorer = scorer;
+    const lt = this.lastBallTouch;
+    const ownGoal = !!(lt && lt.team && lt.team !== scorer);
+    this.broadcast({
+      type: 'goal',
+      scorer,
+      scoreRed: this.scoreRed,
+      scoreBlue: this.scoreBlue,
+      scorerName: lt ? lt.name : null,
+      ownGoal,
+    });
+    this.lastBallTouch = null;
+    this.goalCelebration = TICK_HZ * 2;
     if (this.scoreRed >= this.matchOpts.goalsToWin || this.scoreBlue >= this.matchOpts.goalsToWin) {
       this.endMatch();
     } else {
-      // reset positions after a short delay
       setTimeout(() => {
-        if (this.state === 'playing') this.initMatch();
+        if (this.state !== 'playing') return;
+        this.resetPositions();
+        this.kickoffCountdown = TICK_HZ * 3;
       }, 1800);
     }
   }
 
   endMatch() {
     this.state = 'finished';
+    if (this.tickInterval) { clearInterval(this.tickInterval); this.tickInterval = null; }
+    const winner = this.scoreRed === this.scoreBlue ? 'draw' : (this.scoreRed > this.scoreBlue ? 'red' : 'blue');
     this.broadcast({
       type: 'matchEnd',
-      winner: this.scoreRed > this.scoreBlue ? 'red' : 'blue',
+      winner,
       scoreRed: this.scoreRed,
       scoreBlue: this.scoreBlue,
     });
     setTimeout(() => {
+      // Skip if a rematch was already started.
+      if (this.state !== 'finished') return;
       this.state = 'lobby';
       this.broadcast({ type: 'roomState', state: 'lobby' });
-    }, 4000);
+    }, 6000);
   }
 
   // ---------- GOLF MODE ----------
@@ -432,6 +587,7 @@ class Room {
 
   endGolf() {
     this.state = 'finished';
+    if (this.tickInterval) { clearInterval(this.tickInterval); this.tickInterval = null; }
     // compile final scores
     const results = [];
     for (const p of this.players.values()) {
@@ -447,6 +603,7 @@ class Room {
     this.broadcast({ type: 'golfEnd', results });
 
     setTimeout(() => {
+      if (this.state !== 'finished') return;
       this.state = 'lobby';
       this.broadcast({ type: 'roomState', state: 'lobby' });
     }, 6000);
@@ -524,6 +681,7 @@ class Room {
             p.strokes++;
             p.lastKickPos = { x: b.x, y: b.y };
           }
+          if (this.mode === 'match') this.lastBallTouch = { id: p.id, name: p.name, team: p.team };
           kicked = true;
         }
       }
@@ -547,6 +705,9 @@ class Room {
         ball.vx -= (1 + restitution) * dot * nx;
         ball.vy -= (1 + restitution) * dot * ny;
         clampSpeed(ball, T.ballMax);
+        if (this.mode === 'match' && ball === this.matchBall) {
+          this.lastBallTouch = { id: p.id, name: p.name, team: p.team };
+        }
       }
     }
   }
@@ -628,6 +789,7 @@ class Room {
   broadcast(msg) {
     const data = JSON.stringify(msg);
     for (const p of this.players.values()) {
+      if (!p.ws) continue;
       try { p.ws.send(data); } catch (e) {}
     }
   }
@@ -658,6 +820,8 @@ class Room {
       state: this.state,
       players,
       goalCelebration: this.goalCelebration > 0,
+      lastScorer: this.lastScorer,
+      kickoff: this.kickoffCountdown > 0 ? Math.ceil(this.kickoffCountdown / TICK_HZ) : 0,
     };
     if (this.mode === 'match') {
       msg.ball = {
@@ -669,6 +833,7 @@ class Room {
       msg.matchTime = Math.round(this.matchTime);
       msg.arena = this.matchOpts.arena;
       msg.goalsToWin = this.matchOpts.goalsToWin;
+      msg.timeLimit = this.matchOpts.timeLimit || 0;
     } else {
       msg.currentHole = this.currentHole;
       msg.totalHoles = this.golfOpts.courseLength;
@@ -679,7 +844,10 @@ class Room {
   sendLobbyState() {
     const playerList = [];
     for (const p of this.players.values()) {
-      playerList.push({ id: p.id, name: p.name, color: p.color, isHost: p.id === this.hostId });
+      playerList.push({
+        id: p.id, name: p.name, color: p.color, team: p.team,
+        isHost: p.id === this.hostId, isBot: !!p.isBot,
+      });
     }
     this.broadcast({
       type: 'lobby',
@@ -830,6 +998,7 @@ wss.on('connection', (ws) => {
         if (currentRoom.mode === 'match' && msg.matchOpts) {
           if (msg.matchOpts.arena && arenas[msg.matchOpts.arena]) currentRoom.matchOpts.arena = msg.matchOpts.arena;
           if (msg.matchOpts.goalsToWin) currentRoom.matchOpts.goalsToWin = clamp(parseInt(msg.matchOpts.goalsToWin), 1, 20);
+          if (msg.matchOpts.timeLimit !== undefined) currentRoom.matchOpts.timeLimit = clamp(parseInt(msg.matchOpts.timeLimit) || 0, 0, 1800);
         }
         if (currentRoom.mode === 'golf' && msg.golfOpts) {
           if (msg.golfOpts.courseLength) currentRoom.golfOpts.courseLength = clamp(parseInt(msg.golfOpts.courseLength), 1, courses.length);
@@ -844,6 +1013,60 @@ wss.on('connection', (ws) => {
         if (currentRoom.mode === 'golf') {
           currentRoom.broadcast({ type: 'newHole', hole: 0, holeData: courses[0] });
         }
+        break;
+      }
+      case 'setTeam': {
+        if (!currentRoom || currentRoom.mode !== 'match' || currentRoom.state !== 'lobby') break;
+        const p = currentRoom.players.get(playerId);
+        if (!p) break;
+        const t = msg.team === 'blue' ? 'blue' : (msg.team === 'red' ? 'red' : null);
+        if (!t) break;
+        p.team = t;
+        currentRoom.sendLobbyState();
+        break;
+      }
+      case 'autoBalance': {
+        if (!currentRoom || currentRoom.hostId !== playerId) break;
+        if (currentRoom.mode !== 'match' || currentRoom.state !== 'lobby') break;
+        const ids = [...currentRoom.players.keys()].sort();
+        ids.forEach((id, i) => {
+          const p = currentRoom.players.get(id);
+          if (p) p.team = i % 2 === 0 ? 'red' : 'blue';
+        });
+        currentRoom.sendLobbyState();
+        break;
+      }
+      case 'addBot': {
+        if (!currentRoom || currentRoom.hostId !== playerId) break;
+        if (currentRoom.state !== 'lobby') break;
+        currentRoom.addBot();
+        currentRoom.sendLobbyState();
+        break;
+      }
+      case 'removeBot': {
+        if (!currentRoom || currentRoom.hostId !== playerId) break;
+        if (currentRoom.state !== 'lobby') break;
+        currentRoom.removeBot(String(msg.id || ''));
+        currentRoom.sendLobbyState();
+        break;
+      }
+      case 'transferHost': {
+        if (!currentRoom || currentRoom.hostId !== playerId) break;
+        const targetId = String(msg.toId || '');
+        if (!currentRoom.players.has(targetId)) break;
+        currentRoom.hostId = targetId;
+        currentRoom.sendLobbyState();
+        break;
+      }
+      case 'rematch': {
+        if (!currentRoom || currentRoom.hostId !== playerId) break;
+        if (currentRoom.mode !== 'match') break;
+        // Allow rematch from finished or lobby state.
+        if (currentRoom.state === 'playing') break;
+        currentRoom.stop();
+        currentRoom.state = 'lobby';
+        currentRoom.start();
+        currentRoom.broadcast({ type: 'gameStart', mode: currentRoom.mode });
         break;
       }
       case 'input': {
@@ -869,11 +1092,17 @@ wss.on('connection', (ws) => {
 
   function leaveRoom() {
     if (!currentRoom) return;
+    const leaver = currentRoom.players.get(playerId);
+    const wasPlaying = currentRoom.state === 'playing';
+    const leaverName = leaver ? leaver.name : null;
     const empty = currentRoom.removePlayer(playerId);
     if (empty) {
       currentRoom.stop();
       rooms.delete(currentRoom.code);
     } else {
+      if (wasPlaying && leaverName) {
+        currentRoom.broadcast({ type: 'playerLeft', name: leaverName });
+      }
       currentRoom.sendLobbyState();
     }
     playerRooms.delete(playerId);

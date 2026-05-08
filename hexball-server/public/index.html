@@ -229,8 +229,52 @@
     flex-shrink: 0;
   }
 
-  .canvas-wrap { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .canvas-wrap { flex: 1 1 auto; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; min-height: 0; }
   canvas { display: block; background: var(--canvas-bg); touch-action: none; }
+
+  /* Touch controls bar — fixed-height row UNDER the canvas, never overlaps the playfield */
+  .touch-controls {
+    flex: 0 0 auto;
+    display: flex; gap: 10px;
+    padding: 10px max(env(safe-area-inset-left), 12px) max(env(safe-area-inset-bottom), 10px) max(env(safe-area-inset-right), 12px);
+    height: 88px;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+  }
+  .touch-controls .move-hint {
+    flex: 1.4; display: flex; align-items: center; justify-content: center;
+    font-family: 'Space Mono', monospace; font-size: 10px; letter-spacing: 0.25em;
+    color: var(--muted);
+    border: 1px dashed var(--line);
+    user-select: none; -webkit-user-select: none;
+    pointer-events: none;
+  }
+  .touch-btn {
+    flex: 1;
+    font-family: 'Space Mono', monospace;
+    font-size: 14px; font-weight: 700;
+    letter-spacing: 0.22em;
+    border: 2px solid var(--line);
+    background: var(--bg-2);
+    color: var(--ink);
+    user-select: none; -webkit-user-select: none;
+    touch-action: manipulation;
+    cursor: pointer;
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.06s ease, background 0.1s ease;
+  }
+  .touch-btn.kick { color: var(--red); border-color: var(--red); }
+  .touch-btn.boost { color: var(--accent); border-color: var(--accent); }
+  .touch-btn.pressed { transform: scale(0.96); }
+  .touch-btn.kick.pressed { background: var(--red); color: var(--bg); }
+  .touch-btn.boost.pressed { background: var(--accent); color: var(--bg); }
+  .touch-btn .boost-fill {
+    position: absolute; left: 0; bottom: 0; width: 100%;
+    background: var(--accent); opacity: 0.18;
+    pointer-events: none;
+  }
+  body.pc-mode .touch-controls { display: none; }
 
   .flash { position: absolute; inset: 0; background: var(--accent); opacity: 0; pointer-events: none; z-index: 8; }
   .flash.show { animation: flashAnim 0.6s ease-out; }
@@ -253,8 +297,114 @@
     100% { opacity: 0; transform: translate(-50%, -50%) scale(1.05); }
   }
 
-  /* Toasts */
-  .toasts { position: absolute; top: 60px; left: 12px; right: 12px; z-index: 10; pointer-events: none; }
+  /* Toasts (global, sits above all screens) */
+  .toasts { position: fixed; top: 70px; left: 12px; right: 12px; z-index: 50; pointer-events: none; max-width: 520px; margin: 0 auto; }
+
+  /* Chat (lobby + game) */
+  .chat-box {
+    border: 1px solid var(--line);
+    background: var(--bg-2);
+    padding: 8px;
+    margin-top: 8px;
+    display: flex; flex-direction: column;
+    max-height: 180px;
+  }
+  .chat-log {
+    flex: 1;
+    font-size: 11px; letter-spacing: 0.02em;
+    overflow-y: auto;
+    margin-bottom: 6px;
+    max-height: 120px;
+    line-height: 1.5;
+  }
+  .chat-log .msg { margin: 2px 0; }
+  .chat-log .msg .who { font-weight: 700; margin-right: 5px; }
+  .chat-input-row { display: flex; gap: 6px; }
+  .chat-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    padding: 8px;
+    font-family: inherit; font-size: 12px;
+  }
+  .chat-input:focus { outline: none; border-color: var(--accent); }
+  .chat-send {
+    background: var(--accent); color: var(--bg);
+    border: none; padding: 0 14px; cursor: pointer;
+    font-family: 'Space Mono', monospace; font-size: 11px; letter-spacing: 0.2em; font-weight: 700;
+  }
+
+  /* In-game floating chat panel */
+  .game-chat {
+    position: absolute; left: 8px; top: 56px;
+    width: min(280px, 60%);
+    background: rgba(0,0,0,0.55);
+    border: 1px solid rgba(255,255,255,0.18);
+    padding: 6px 8px;
+    z-index: 7;
+    pointer-events: none;
+    color: #fff;
+    font-size: 11px;
+    line-height: 1.4;
+    display: none;
+  }
+  .game-chat.show { display: block; }
+  .game-chat .msg { margin: 1px 0; }
+  .game-chat-input-wrap {
+    position: absolute; left: 8px; right: 8px; bottom: 8px;
+    z-index: 11;
+    display: none;
+  }
+  .game-chat-input-wrap.show { display: flex; gap: 6px; }
+  .game-chat-input-wrap input {
+    flex: 1;
+    background: var(--bg-2); border: 1px solid var(--accent);
+    color: var(--ink); padding: 10px;
+    font-family: inherit; font-size: 13px;
+  }
+  .game-chat-input-wrap button {
+    background: var(--accent); color: var(--bg);
+    border: none; padding: 0 14px; cursor: pointer;
+    font-family: 'Space Mono', monospace; font-size: 11px; letter-spacing: 0.2em; font-weight: 700;
+  }
+  .chat-fab {
+    position: absolute; top: 56px; right: 8px;
+    width: 36px; height: 36px;
+    background: rgba(0,0,0,0.55); color: #fff;
+    border: 1px solid rgba(255,255,255,0.2);
+    cursor: pointer; z-index: 7;
+    font-size: 16px; font-family: inherit;
+  }
+  body.pc-mode .chat-fab { display: none; }
+
+  /* In-game roster (small button + popup) */
+  .roster-fab {
+    position: absolute; top: 96px; right: 8px;
+    width: 36px; height: 36px;
+    background: rgba(0,0,0,0.55); color: #fff;
+    border: 1px solid rgba(255,255,255,0.2);
+    cursor: pointer; z-index: 7;
+    font-size: 16px; font-family: inherit;
+  }
+  .roster-popup {
+    position: absolute; top: 138px; right: 8px;
+    background: rgba(0,0,0,0.7);
+    border: 1px solid rgba(255,255,255,0.2);
+    padding: 10px 12px; z-index: 8;
+    color: #fff;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px; letter-spacing: 0.06em;
+    min-width: 140px;
+    display: none;
+  }
+  .roster-popup.show { display: block; }
+  .roster-popup .team-h { font-weight: 700; letter-spacing: 0.2em; margin-top: 6px; }
+  .roster-popup .team-h:first-child { margin-top: 0; }
+  .roster-popup .team-h.red { color: var(--red); }
+  .roster-popup .team-h.blue { color: var(--blue); }
+  .roster-popup .row { padding: 2px 0; }
+  .roster-popup .row.you { color: var(--accent); font-weight: 700; }
   .toast {
     background: var(--bg-2);
     border: 1px solid var(--line);
@@ -284,6 +434,8 @@
     margin: 0 0 4px; color: var(--accent);
   }
   .endgame .subtitle { color: var(--muted); font-size: 11px; letter-spacing: 0.25em; text-transform: uppercase; margin-bottom: 16px; }
+  .endgame-actions { display: flex; gap: 8px; margin-top: 16px; max-width: 420px; width: 100%; }
+  .endgame-actions button { flex: 1; }
   .results-table {
     width: 100%; max-width: 440px;
     border-collapse: collapse;
@@ -295,6 +447,133 @@
   }
   .results-table th { color: var(--muted); font-weight: 400; font-size: 10px; letter-spacing: 0.2em; }
   .results-table tr.winner td { color: var(--accent); font-weight: 700; }
+
+  /* Team chips in lobby */
+  .player-row .team-chips { margin-left: auto; display: flex; gap: 4px; }
+  .team-chip {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px; letter-spacing: 0.2em;
+    border: 1px solid var(--line);
+    background: transparent; color: var(--muted);
+    padding: 4px 8px; cursor: default;
+    transition: all 0.15s;
+  }
+  .team-chip.active.red { border-color: var(--red); color: var(--red); background: rgba(200,56,56,0.08); font-weight: 700; }
+  .team-chip.active.blue { border-color: var(--blue); color: var(--blue); background: rgba(45,95,184,0.08); font-weight: 700; }
+  .team-chip.clickable { cursor: pointer; }
+  .team-chip.clickable:active { transform: scale(0.95); }
+  .team-chip.clickable:hover { border-color: var(--ink); color: var(--ink); }
+  .team-chip.clickable.active.red:hover { color: var(--red); border-color: var(--red); }
+  .team-chip.clickable.active.blue:hover { color: var(--blue); border-color: var(--blue); }
+  .player-row .host-badge { margin-left: 8px; }
+
+  .team-summary {
+    display: flex; justify-content: center; gap: 16px;
+    font-family: 'Space Mono', monospace; font-size: 11px;
+    letter-spacing: 0.2em; margin: 8px 0 0;
+  }
+  .team-summary .red { color: var(--red); }
+  .team-summary .blue { color: var(--blue); }
+  .team-summary .sep { color: var(--muted); }
+  .team-summary .warn { color: var(--accent); font-size: 9px; }
+
+  .auto-balance-row { display: flex; gap: 8px; margin-top: 8px; }
+  .auto-balance-row button { flex: 1; }
+
+  /* Kickoff / scorer overlays */
+  .kickoff-overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none; z-index: 9;
+  }
+  .kickoff-num {
+    font-family: 'Space Mono', monospace;
+    font-size: 120px; font-weight: 700;
+    color: var(--accent);
+    text-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    animation: kickoffPulse 1s ease-out;
+  }
+  @keyframes kickoffPulse {
+    0% { opacity: 0; transform: scale(1.6); }
+    20% { opacity: 1; transform: scale(1); }
+    100% { opacity: 0.3; transform: scale(0.85); }
+  }
+  .scorer-banner {
+    position: absolute; top: 28%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Space Mono', monospace;
+    font-size: 32px; font-weight: 700;
+    letter-spacing: 0.18em;
+    text-align: center;
+    pointer-events: none;
+    z-index: 9;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  }
+  .scorer-banner .sub {
+    display: block;
+    font-size: 22px; margin-top: 6px;
+    letter-spacing: 0.15em;
+    color: var(--ink);
+  }
+  .scorer-banner .byline {
+    display: block;
+    font-size: 14px; margin-top: 8px;
+    letter-spacing: 0.1em;
+    color: var(--ink); font-weight: 400;
+  }
+
+  /* Goal-time canvas shake */
+  .canvas-wrap.shake { animation: shakeAnim 0.5s ease-out; }
+  @keyframes shakeAnim {
+    0% { transform: translate(0, 0); }
+    10% { transform: translate(-6px, 4px); }
+    20% { transform: translate(8px, -3px); }
+    30% { transform: translate(-7px, -5px); }
+    40% { transform: translate(5px, 6px); }
+    55% { transform: translate(-4px, 2px); }
+    70% { transform: translate(3px, -2px); }
+    85% { transform: translate(-1px, 1px); }
+    100% { transform: translate(0, 0); }
+  }
+  .scorer-banner.show { animation: scorerAnim 2.4s ease-out forwards; }
+  @keyframes scorerAnim {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+    15% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+    80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+  }
+
+  /* PC keyboard legend */
+  .key-legend {
+    position: absolute; bottom: 8px; left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Space Mono', monospace;
+    font-size: 10px; letter-spacing: 0.18em;
+    color: var(--muted);
+    background: rgba(0,0,0,0.35);
+    padding: 4px 10px;
+    border: 1px solid rgba(255,255,255,0.15);
+    pointer-events: none;
+    z-index: 6;
+    white-space: nowrap;
+  }
+  .key-legend kbd {
+    font-family: inherit;
+    border: 1px solid rgba(255,255,255,0.4);
+    padding: 1px 5px;
+    color: #fff;
+    background: rgba(255,255,255,0.08);
+    margin: 0 2px;
+  }
+
+  /* Mode/scrolling */
+  body.pc-mode #lobbyScreen, body.pc-mode #homeScreen, body.pc-mode #joinScreen {
+    max-width: 520px; margin: 0 auto;
+  }
+  @media (min-width: 800px) {
+    .hud-score { font-size: 28px; }
+    .brand { font-size: 44px; }
+  }
 </style>
 </head>
 <body>
@@ -303,11 +582,16 @@
 
 <div id="app">
 
+  <div class="toasts" id="toasts"></div>
+
   <!-- ============ HOME ============ -->
   <div class="screen active" id="homeScreen">
     <div class="top-bar">
       <h1 class="brand">HEX<span class="dot">·</span>BALL</h1>
-      <button class="icon-btn" id="themeToggle" aria-label="toggle theme">☼</button>
+      <div style="display:flex; gap:6px;">
+        <button class="icon-btn" id="muteToggle" aria-label="toggle sound" title="sound">♪</button>
+        <button class="icon-btn" id="themeToggle" aria-label="toggle theme">☼</button>
+      </div>
     </div>
     <div class="tag">— online multiplayer —</div>
     <div class="conn-status" id="connStatus"><span class="dot"></span><span id="connLabel">Connecting…</span></div>
@@ -369,6 +653,13 @@
           <button class="opt" data-goals="5">5 goals</button>
           <button class="opt" data-goals="7">7 goals</button>
         </div>
+        <div class="label">Time Limit</div>
+        <div class="options" id="timeOpts">
+          <button class="opt active" data-time="0">No limit</button>
+          <button class="opt" data-time="180">3 min</button>
+          <button class="opt" data-time="300">5 min</button>
+          <button class="opt" data-time="420">7 min</button>
+        </div>
       </div>
       <div id="golfOpts" style="display:none;">
         <div class="label">Course Length</div>
@@ -381,10 +672,24 @@
     </div>
 
     <div class="label">Players (<span id="playerCount">0</span>/6)</div>
+    <div class="team-summary" id="teamSummary" style="display:none;"></div>
     <div class="player-list" id="playerList"></div>
+
+    <div class="auto-balance-row" id="autoBalanceRow" style="display:none;">
+      <button class="btn-secondary" id="autoBalanceBtn">⚖ AUTO-BALANCE</button>
+      <button class="btn-secondary" id="addBotBtn">+ ADD BOT</button>
+    </div>
 
     <button class="btn-primary" id="startBtn" style="margin-top:auto;">▶ START GAME</button>
     <div id="lobbyHint" style="text-align:center; color:var(--muted); font-size:10px; letter-spacing:0.2em; margin-top:8px;"></div>
+
+    <div class="chat-box">
+      <div class="chat-log" id="lobbyChatLog"></div>
+      <div class="chat-input-row">
+        <input type="text" id="lobbyChatInput" class="chat-input" placeholder="Say something…" maxlength="200" />
+        <button class="chat-send" id="lobbyChatSend">SEND</button>
+      </div>
+    </div>
   </div>
 
   <!-- ============ GAME ============ -->
@@ -408,14 +713,35 @@
       <canvas id="canvas"></canvas>
       <div class="flash" id="flash"></div>
       <div class="goal-text" id="goalText">GOAL</div>
-      <div class="toasts" id="toasts"></div>
+      <div class="scorer-banner" id="scorerBanner" style="display:none;"></div>
+      <div class="kickoff-overlay" id="kickoffOverlay" style="display:none;"><div class="kickoff-num" id="kickoffNum">3</div></div>
+      <div class="key-legend" id="keyLegend" style="display:none;">
+        <kbd>WASD</kbd> MOVE · <kbd>SPACE</kbd> KICK · <kbd>SHIFT</kbd> BOOST · <kbd>T</kbd> CHAT
+      </div>
+      <div class="game-chat" id="gameChat"></div>
+      <button class="chat-fab" id="chatFab" aria-label="open chat">💬</button>
+      <button class="roster-fab" id="rosterFab" aria-label="show roster" title="show roster">👥</button>
+      <div class="roster-popup" id="rosterPopup"></div>
+      <div class="game-chat-input-wrap" id="gameChatInputWrap">
+        <input type="text" id="gameChatInput" maxlength="200" placeholder="Press Enter to send · Esc to close" />
+        <button id="gameChatSend">SEND</button>
+      </div>
+    </div>
+
+    <div class="touch-controls" id="touchControls">
+      <div class="move-hint">DRAG ON FIELD ↑→↓← TO MOVE</div>
+      <button class="touch-btn boost" id="boostBtn">BOOST<span class="boost-fill" id="boostFill"></span></button>
+      <button class="touch-btn kick" id="kickBtn">KICK</button>
     </div>
 
     <div class="endgame" id="endgame">
       <h2 id="endTitle">RESULTS</h2>
       <div class="subtitle">— round complete —</div>
       <table class="results-table" id="resultsTable"></table>
-      <button class="btn-primary" id="backToLobbyBtn" style="max-width:300px; margin-top:16px;">BACK TO LOBBY</button>
+      <div class="endgame-actions">
+        <button class="btn-primary" id="rematchBtn" style="display:none;">REMATCH</button>
+        <button class="btn-secondary" id="backToLobbyBtn">BACK TO LOBBY</button>
+      </div>
     </div>
   </div>
 
@@ -456,6 +782,110 @@ function refreshTheme() {
 applyTheme(savedTheme);
 themeToggle.addEventListener('click', () => applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'));
 
+// ============== AUDIO ==============
+// Tiny synthesizer that creates AudioContext lazily on first sound.
+// All sounds are generated procedurally so we don't ship audio files.
+const audio = {
+  ctx: null,
+  muted: false,
+  init() {
+    if (this.ctx) return;
+    try {
+      const C = window.AudioContext || window.webkitAudioContext;
+      if (!C) return;
+      this.ctx = new C();
+    } catch (e) { this.ctx = null; }
+  },
+  resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(()=>{}); },
+  play(type) {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx) return;
+    this.resume();
+    const t = this.ctx.currentTime;
+    switch (type) {
+      case 'kick': {
+        // Short percussive thump: a noise burst + sub thump
+        const dur = 0.10;
+        // sub thump
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'sine'; o.frequency.setValueAtTime(180, t); o.frequency.exponentialRampToValueAtTime(60, t + dur);
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + 0.005); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        o.connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + dur + 0.02);
+        // noise click
+        const buf = this.ctx.createBuffer(1, 1024, this.ctx.sampleRate);
+        const ch = buf.getChannelData(0);
+        for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i/ch.length);
+        const src = this.ctx.createBufferSource(); src.buffer = buf;
+        const ng = this.ctx.createGain(); ng.gain.setValueAtTime(0.35, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+        src.connect(ng).connect(this.ctx.destination); src.start(t);
+        break;
+      }
+      case 'wallBounce': {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'square'; o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(110, t + 0.05);
+        g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.15, t + 0.005); g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+        o.connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + 0.08);
+        break;
+      }
+      case 'goal': {
+        // Triumphant chord: triad ascending
+        const freqs = [261.63, 329.63, 392.00, 523.25];
+        freqs.forEach((f, i) => {
+          const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+          o.type = 'triangle'; o.frequency.setValueAtTime(f, t + i * 0.06);
+          g.gain.setValueAtTime(0.0001, t + i*0.06);
+          g.gain.linearRampToValueAtTime(0.18, t + i*0.06 + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.001, t + i*0.06 + 0.6);
+          o.connect(g).connect(this.ctx.destination); o.start(t + i*0.06); o.stop(t + i*0.06 + 0.65);
+        });
+        break;
+      }
+      case 'whistle': {
+        // Short ref-whistle (descending FM-like sweep)
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'sine'; o.frequency.setValueAtTime(2400, t); o.frequency.exponentialRampToValueAtTime(1400, t + 0.4);
+        g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.18, t + 0.04); g.gain.linearRampToValueAtTime(0.18, t + 0.32); g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+        o.connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + 0.5);
+        break;
+      }
+      case 'countdownBeep': {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'sine'; o.frequency.setValueAtTime(880, t);
+        g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.22, t + 0.01); g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+        o.connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + 0.2);
+        break;
+      }
+      case 'go': {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'square'; o.frequency.setValueAtTime(660, t); o.frequency.linearRampToValueAtTime(990, t + 0.18);
+        g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.2, t + 0.01); g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+        o.connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + 0.28);
+        break;
+      }
+      case 'click': {
+        const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+        o.type = 'square'; o.frequency.setValueAtTime(1200, t);
+        g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.06, t + 0.005); g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+        o.connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + 0.08);
+        break;
+      }
+    }
+  },
+};
+try { audio.muted = localStorage.getItem('hexball-muted') === '1'; } catch(e){}
+const muteToggle = document.getElementById('muteToggle');
+function refreshMuteIcon() { muteToggle.textContent = audio.muted ? '♪̸' : '♪'; muteToggle.style.opacity = audio.muted ? 0.5 : 1; }
+refreshMuteIcon();
+muteToggle.addEventListener('click', () => {
+  audio.muted = !audio.muted;
+  try { localStorage.setItem('hexball-muted', audio.muted ? '1' : '0'); } catch(e){}
+  refreshMuteIcon();
+  if (!audio.muted) audio.play('click');
+});
+// Resume on first interaction (browser autoplay policy)
+['pointerdown','keydown','touchstart'].forEach(ev => window.addEventListener(ev, () => audio.resume(), { once: true, passive: true }));
+
 // ============== STATE ==============
 const localState = {
   ws: null,
@@ -465,7 +895,7 @@ const localState = {
   selectedMode: 'match',
   roomCode: null,
   isHost: false,
-  matchOpts: { arena: 'classic', goalsToWin: 3 },
+  matchOpts: { arena: 'classic', goalsToWin: 3, timeLimit: 0 },
   golfOpts: { courseLength: 6 },
   // server-pushed state
   game: {
@@ -478,8 +908,21 @@ const localState = {
     currentHole: 0, totalHoles: 6,
     holeData: null,
     goalCelebration: false,
+    kickoff: 0,
+    lastScorer: null,
   },
+  // Interpolation snapshots for smooth rendering between 30Hz server states.
+  // prev = state at lastTickTime - TICK_MS, curr = state at lastTickTime.
+  snap: {
+    prev: null, curr: null,
+    prevTime: 0, currTime: 0,
+  },
+  pcMode: false,    // becomes true on first keyboard event
+  ballTrail: [],    // cached ball positions for trail effect
+  kickFlash: null,  // {x, y, t0} for brief impact ring
+  myMatchTeam: null, // last known own team for end-screen W/L tagging
 };
+const TICK_MS_CLIENT = 1000 / 30;
 
 // Load saved name
 try { localState.myName = localStorage.getItem('hexball-name') || ''; } catch(e){}
@@ -488,6 +931,19 @@ nameInput.value = localState.myName;
 nameInput.addEventListener('input', () => {
   localState.myName = nameInput.value.trim();
   try { localStorage.setItem('hexball-name', localState.myName); } catch(e){}
+  // If we landed via #CODE and were waiting on a name, attempt auto-join now.
+  if (autoJoinCode && localState.myName && localState.connected) {
+    // Slight debounce so user can keep typing without spamming joinRoom
+    if (autoJoinDebounce) clearTimeout(autoJoinDebounce);
+    autoJoinDebounce = setTimeout(() => maybeAutoJoin(), 600);
+  }
+});
+let autoJoinDebounce = null;
+nameInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && autoJoinCode && localState.myName && localState.connected) {
+    if (autoJoinDebounce) clearTimeout(autoJoinDebounce);
+    maybeAutoJoin();
+  }
 });
 
 // ============== SCREENS ==============
@@ -568,10 +1024,14 @@ function handleMessage(msg) {
       break;
     case 'gameStart':
       localState.game.mode = msg.mode;
+      // Reset snapshot/effects buffers for the new game
+      localState.snap.prev = null; localState.snap.curr = null;
+      localState.ballTrail = [];
+      localState.kickFlash = null;
       onGameStart();
       break;
     case 'state':
-      Object.assign(localState.game, msg);
+      ingestState(msg);
       break;
     case 'newHole':
       localState.game.currentHole = msg.hole;
@@ -581,8 +1041,11 @@ function handleMessage(msg) {
     case 'goal':
       localState.game.scoreRed = msg.scoreRed;
       localState.game.scoreBlue = msg.scoreBlue;
-      flashGoalText('GOAL!', msg.scorer === 'red' ? theme.red : theme.blue);
-      if (navigator.vibrate) navigator.vibrate(40);
+      showScorerBanner(msg.scorer, msg.scoreRed, msg.scoreBlue, msg.scorerName, msg.ownGoal);
+      audio.play('whistle');
+      setTimeout(() => audio.play('goal'), 250);
+      shakeCanvas();
+      if (navigator.vibrate) navigator.vibrate([60, 80, 120]);
       break;
     case 'splash':
       addToast('💦 ' + msg.name + ' splashed (+1)');
@@ -601,6 +1064,8 @@ function handleMessage(msg) {
       break;
     }
     case 'matchEnd':
+      audio.play('whistle');
+      setTimeout(() => audio.play('whistle'), 280);
       showMatchEnd(msg);
       break;
     case 'golfEnd':
@@ -613,12 +1078,42 @@ function handleMessage(msg) {
       }
       break;
     case 'chat':
-      addToast(msg.name + ': ' + msg.text);
+      appendChat(msg);
+      break;
+    case 'playerLeft':
+      addToast('← ' + msg.name + ' left');
       break;
     case 'error':
       document.getElementById('joinError').textContent = msg.message;
+      // also clear after a few seconds
+      setTimeout(() => { document.getElementById('joinError').textContent = ''; }, 3000);
       break;
   }
+}
+
+// Capture state and rotate interpolation snapshots.
+function ingestState(msg) {
+  // Don't blow away the holeData reference when state arrives in golf mode.
+  const prevHoleData = localState.game.holeData;
+  Object.assign(localState.game, msg);
+  if (!msg.holeData && prevHoleData) localState.game.holeData = prevHoleData;
+
+  // Track own team for endgame W/L logic
+  if (msg.players) {
+    const me = msg.players.find(p => p.id === localState.playerId);
+    if (me && me.team) localState.myMatchTeam = me.team;
+  }
+
+  const now = performance.now();
+  const snap = localState.snap;
+  // Move current → prev, store new as current.
+  if (snap.curr) {
+    snap.prev = snap.curr;
+    snap.prevTime = snap.currTime;
+  }
+  snap.curr = msg;
+  snap.currTime = now;
+  if (!snap.prev) { snap.prev = msg; snap.prevTime = now - TICK_MS_CLIENT; }
 }
 
 connect();
@@ -700,9 +1195,23 @@ function bindOptGroup(id, key, attr, scope, parser = v => v) {
 }
 bindOptGroup('arenaOpts', 'arena', 'arena', 'matchOpts');
 bindOptGroup('goalsOpts', 'goalsToWin', 'goals', 'matchOpts', v => parseInt(v, 10));
+bindOptGroup('timeOpts', 'timeLimit', 'time', 'matchOpts', v => parseInt(v, 10));
 bindOptGroup('courseOpts', 'courseLength', 'course', 'golfOpts', v => parseInt(v, 10));
 
 function updateLobby(msg) {
+  // Detect host changes for a friendly toast
+  const prevHostId = localState.lastHostId;
+  if (prevHostId && prevHostId !== msg.hostId) {
+    const newHost = msg.players.find(p => p.id === msg.hostId);
+    const newHostName = newHost ? newHost.name : 'someone';
+    if (msg.hostId === localState.playerId) {
+      addToast('👑 You are now the host');
+    } else {
+      addToast('👑 ' + newHostName + ' is now the host');
+    }
+  }
+  localState.lastHostId = msg.hostId;
+
   localState.roomCode = msg.code;
   localState.isHost = msg.hostId === localState.playerId;
   localState.matchOpts = msg.matchOpts;
@@ -719,23 +1228,71 @@ function updateLobby(msg) {
   if (msg.mode === 'match') {
     document.querySelectorAll('#arenaOpts .opt').forEach(b => b.classList.toggle('active', b.dataset.arena === msg.matchOpts.arena));
     document.querySelectorAll('#goalsOpts .opt').forEach(b => b.classList.toggle('active', parseInt(b.dataset.goals) === msg.matchOpts.goalsToWin));
+    document.querySelectorAll('#timeOpts .opt').forEach(b => b.classList.toggle('active', parseInt(b.dataset.time) === (msg.matchOpts.timeLimit||0)));
   } else {
     document.querySelectorAll('#courseOpts .opt').forEach(b => b.classList.toggle('active', parseInt(b.dataset.course) === msg.golfOpts.courseLength));
   }
 
-  // Player list
+  // Player list with team chips (match mode only)
   document.getElementById('playerCount').textContent = msg.players.length;
   const list = document.getElementById('playerList');
   list.innerHTML = '';
+  let redCount = 0, blueCount = 0;
   for (const p of msg.players) {
+    if (p.team === 'red') redCount++;
+    if (p.team === 'blue') blueCount++;
     const row = document.createElement('div');
     row.className = 'player-row';
-    row.innerHTML = `
-      <span class="swatch" style="background:${p.color}"></span>
-      <span>${escapeHtml(p.name)}${p.id === localState.playerId ? ' (you)' : ''}</span>
-      ${p.isHost ? '<span class="host-badge">HOST</span>' : ''}
-    `;
+    const isMe = p.id === localState.playerId;
+
+    if (msg.mode === 'match') {
+      const canHostManageBot = p.isBot && localState.isHost;
+      const redChip = `<button class="team-chip red ${p.team === 'red' ? 'active' : ''} ${isMe ? 'clickable' : ''}" data-team="red" ${isMe ? '' : 'disabled'}>RED</button>`;
+      const blueChip = `<button class="team-chip blue ${p.team === 'blue' ? 'active' : ''} ${isMe ? 'clickable' : ''}" data-team="blue" ${isMe ? '' : 'disabled'}>BLUE</button>`;
+      const botBadge = p.isBot ? '<span class="host-badge" style="color:var(--muted); border-color:var(--muted);">BOT</span>' : '';
+      const rmBtn = canHostManageBot ? `<button class="team-chip clickable" data-rmbot="${escapeHtml(p.id)}" title="remove bot" style="border-color:var(--red); color:var(--red); margin-left:4px;">×</button>` : '';
+      row.innerHTML = `
+        <span>${escapeHtml(p.name)}${isMe ? ' (you)' : ''}</span>
+        ${p.isHost ? '<span class="host-badge">HOST</span>' : ''}
+        ${botBadge}
+        <div class="team-chips">${redChip}${blueChip}${rmBtn}</div>
+      `;
+      if (isMe) {
+        row.querySelectorAll('.team-chip[data-team]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            if (btn.classList.contains('active')) return;
+            send({ type: 'setTeam', team: btn.dataset.team });
+          });
+        });
+      }
+      if (canHostManageBot) {
+        const rm = row.querySelector('[data-rmbot]');
+        if (rm) rm.addEventListener('click', () => send({ type: 'removeBot', id: rm.dataset.rmbot }));
+      }
+    } else {
+      row.innerHTML = `
+        <span class="swatch" style="background:${p.color}"></span>
+        <span>${escapeHtml(p.name)}${isMe ? ' (you)' : ''}</span>
+        ${p.isHost ? '<span class="host-badge">HOST</span>' : ''}
+      `;
+    }
     list.appendChild(row);
+  }
+
+  // Team summary + auto-balance (match mode only)
+  const summary = document.getElementById('teamSummary');
+  const autoRow = document.getElementById('autoBalanceRow');
+  if (msg.mode === 'match') {
+    summary.style.display = 'flex';
+    let warn = '';
+    if (msg.players.length >= 2 && Math.abs(redCount - blueCount) > 1) warn = ' · ⚠ unbalanced';
+    summary.innerHTML = `<span class="red">RED ${redCount}</span><span class="sep">vs</span><span class="blue">BLUE ${blueCount}</span><span class="warn">${warn}</span>`;
+    // Show host controls (auto-balance + add bot) whenever host has at least one slot to fill or one teammate
+    autoRow.style.display = localState.isHost ? 'flex' : 'none';
+    document.getElementById('addBotBtn').disabled = msg.players.length >= 6;
+  } else {
+    summary.style.display = 'none';
+    autoRow.style.display = 'none';
   }
 
   // Start button visibility
@@ -743,8 +1300,16 @@ function updateLobby(msg) {
   const hint = document.getElementById('lobbyHint');
   if (localState.isHost) {
     startBtn.style.display = 'block';
-    startBtn.disabled = msg.players.length < 1;
-    hint.textContent = msg.players.length < 2 ? '↑ playable solo, but more is more fun' : '';
+    let disable = msg.players.length < 1;
+    let hintText = msg.players.length < 2 ? '↑ playable solo, but more is more fun' : '';
+    if (msg.mode === 'match' && msg.players.length >= 2) {
+      if (redCount === 0 || blueCount === 0) {
+        disable = true;
+        hintText = '↑ both teams need at least one player';
+      }
+    }
+    startBtn.disabled = disable;
+    hint.textContent = hintText;
   } else {
     startBtn.style.display = 'none';
     hint.textContent = 'waiting for host to start…';
@@ -755,6 +1320,15 @@ function updateLobby(msg) {
     showScreen('lobbyScreen');
   }
 }
+
+document.getElementById('autoBalanceBtn').addEventListener('click', () => {
+  if (!localState.isHost) return;
+  send({ type: 'autoBalance' });
+});
+document.getElementById('addBotBtn').addEventListener('click', () => {
+  if (!localState.isHost) return;
+  send({ type: 'addBot' });
+});
 
 function leaveRoomToHome() {
   if (localState.ws && localState.ws.readyState === 1) {
@@ -819,6 +1393,7 @@ function onGameStart() {
   document.getElementById('endgame').classList.remove('show');
   document.getElementById('matchHud').style.display = localState.game.mode === 'match' ? 'flex' : 'none';
   document.getElementById('golfHud').style.display = localState.game.mode === 'golf' ? 'flex' : 'none';
+  document.getElementById('keyLegend').style.display = localState.pcMode ? 'block' : 'none';
   setTimeout(refitForCurrentMode, 50);
   window.scrollTo(0, 1);
 }
@@ -853,15 +1428,14 @@ function getCanvasPoint(cx, cy) {
 }
 function inCircle(x, y, cx, cy, r) { return (x-cx)**2 + (y-cy)**2 <= r*r; }
 
+// Movement is captured anywhere on the canvas (drag-based virtual stick, no visual).
+// Kick and boost are now off-canvas HTML buttons (see #kickBtn/#boostBtn) so they
+// never overlap the playfield.
 canvas.addEventListener('touchstart', e => {
   for (const t of e.changedTouches) {
     const p = getCanvasPoint(t.clientX, t.clientY);
     if (p.x < 0 || p.y < 0 || p.x > displayW || p.y > displayH) continue;
-    if (inCircle(p.x, p.y, ctrl.kickX, ctrl.kickY, ctrl.kickR + 8) && ctrl.kickTouchId === null) {
-      ctrl.kickTouchId = t.identifier; ctrl.kickPressed = true; input.kicking = true;
-    } else if (inCircle(p.x, p.y, ctrl.boostX, ctrl.boostY, ctrl.boostR + 8) && ctrl.boostTouchId === null) {
-      ctrl.boostTouchId = t.identifier; ctrl.boostPressed = true; input.boosting = true;
-    } else if (ctrl.joyTouchId === null && p.x < displayW * 0.5) {
+    if (ctrl.joyTouchId === null) {
       ctrl.joyTouchId = t.identifier;
       ctrl.joyActive = true;
       ctrl.joyOriginX = p.x; ctrl.joyOriginY = p.y;
@@ -894,28 +1468,21 @@ canvas.addEventListener('touchmove', e => {
 
 function endTouch(t) {
   if (t.identifier === ctrl.joyTouchId) { ctrl.joyTouchId = null; ctrl.joyActive = false; input.ax = 0; input.ay = 0; }
-  else if (t.identifier === ctrl.kickTouchId) { ctrl.kickTouchId = null; ctrl.kickPressed = false; input.kicking = false; }
-  else if (t.identifier === ctrl.boostTouchId) { ctrl.boostTouchId = null; ctrl.boostPressed = false; input.boosting = false; }
 }
 canvas.addEventListener('touchend', e => { for (const t of e.changedTouches) endTouch(t); e.preventDefault(); }, { passive: false });
 canvas.addEventListener('touchcancel', e => { for (const t of e.changedTouches) endTouch(t); }, { passive: false });
 
-// Mouse fallback
-let mouseDown = false, mouseTarget = null;
+// Mouse fallback for desktop without keyboard (also fine on PC, harmless because PC mode hides this anyway)
+let mouseDown = false;
 canvas.addEventListener('mousedown', e => {
   const p = getCanvasPoint(e.clientX, e.clientY);
-  if (inCircle(p.x, p.y, ctrl.kickX, ctrl.kickY, ctrl.kickR + 8)) { mouseTarget = 'kick'; ctrl.kickPressed = true; input.kicking = true; }
-  else if (inCircle(p.x, p.y, ctrl.boostX, ctrl.boostY, ctrl.boostR + 8)) { mouseTarget = 'boost'; ctrl.boostPressed = true; input.boosting = true; }
-  else if (p.x < displayW * 0.5) {
-    mouseTarget = 'joy';
-    ctrl.joyActive = true;
-    ctrl.joyOriginX = p.x; ctrl.joyOriginY = p.y;
-    ctrl.joyStickX = p.x; ctrl.joyStickY = p.y;
-  }
+  ctrl.joyActive = true;
+  ctrl.joyOriginX = p.x; ctrl.joyOriginY = p.y;
+  ctrl.joyStickX = p.x; ctrl.joyStickY = p.y;
   mouseDown = true;
 });
 window.addEventListener('mousemove', e => {
-  if (!mouseDown || mouseTarget !== 'joy') return;
+  if (!mouseDown) return;
   const p = getCanvasPoint(e.clientX, e.clientY);
   let dx = p.x - ctrl.joyOriginX, dy = p.y - ctrl.joyOriginY;
   const d = Math.hypot(dx, dy);
@@ -930,10 +1497,86 @@ window.addEventListener('mousemove', e => {
   } else { input.ax = 0; input.ay = 0; }
 });
 window.addEventListener('mouseup', () => {
-  if (mouseTarget === 'joy') { ctrl.joyActive = false; input.ax = 0; input.ay = 0; }
-  if (mouseTarget === 'kick') { ctrl.kickPressed = false; input.kicking = false; }
-  if (mouseTarget === 'boost') { ctrl.boostPressed = false; input.boosting = false; }
-  mouseDown = false; mouseTarget = null;
+  if (mouseDown) { ctrl.joyActive = false; input.ax = 0; input.ay = 0; }
+  mouseDown = false;
+});
+
+// HTML touch buttons for kick and boost (they sit BELOW the canvas)
+function bindTouchBtn(btn, onState) {
+  const setPressed = (down) => {
+    onState(down);
+    btn.classList.toggle('pressed', down);
+  };
+  btn.addEventListener('touchstart', e => { setPressed(true); e.preventDefault(); }, { passive: false });
+  btn.addEventListener('touchend', e => { setPressed(false); e.preventDefault(); }, { passive: false });
+  btn.addEventListener('touchcancel', () => setPressed(false));
+  btn.addEventListener('mousedown', e => { setPressed(true); e.preventDefault(); });
+  btn.addEventListener('mouseup', () => setPressed(false));
+  btn.addEventListener('mouseleave', () => setPressed(false));
+  // Prevent page scroll/text-select shenanigans
+  btn.addEventListener('contextmenu', e => e.preventDefault());
+}
+bindTouchBtn(document.getElementById('kickBtn'), down => { input.kicking = down; ctrl.kickPressed = down; });
+bindTouchBtn(document.getElementById('boostBtn'), down => { input.boosting = down; ctrl.boostPressed = down; });
+
+// ---- Keyboard (PC) ----
+const keysHeld = new Set();
+function isTextField(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
+}
+function recomputeKeyboardInput() {
+  let ax = 0, ay = 0;
+  if (keysHeld.has('w') || keysHeld.has('arrowup')) ay -= 1;
+  if (keysHeld.has('s') || keysHeld.has('arrowdown')) ay += 1;
+  if (keysHeld.has('a') || keysHeld.has('arrowleft')) ax -= 1;
+  if (keysHeld.has('d') || keysHeld.has('arrowright')) ax += 1;
+  const m = Math.hypot(ax, ay);
+  if (m > 1) { ax /= m; ay /= m; }
+  input.ax = ax; input.ay = ay;
+  input.kicking = keysHeld.has(' ') || keysHeld.has('x');
+  input.boosting = keysHeld.has('shift');
+}
+function enterPCMode() {
+  if (localState.pcMode) return;
+  localState.pcMode = true;
+  document.body.classList.add('pc-mode');
+  // Hide on-screen joystick state
+  ctrl.joyActive = false;
+  ctrl.kickPressed = false; ctrl.boostPressed = false;
+  // Show key legend if game is active
+  if (document.getElementById('gameScreen').classList.contains('active')) {
+    document.getElementById('keyLegend').style.display = 'block';
+  }
+}
+window.addEventListener('keydown', e => {
+  if (isTextField(document.activeElement)) return;
+  const k = (e.key || '').toLowerCase();
+  // Open in-game chat with T or Enter
+  if ((k === 't' || k === 'enter') && document.getElementById('gameScreen').classList.contains('active')
+      && !gameChatInputWrap.classList.contains('show')) {
+    e.preventDefault();
+    openGameChat();
+    return;
+  }
+  // Bare control keys we care about
+  const trackable = ['w','a','s','d','x',' ','shift','arrowup','arrowdown','arrowleft','arrowright'];
+  if (!trackable.includes(k)) return;
+  enterPCMode();
+  // Prevent space scroll, arrow scroll
+  if (k === ' ' || k.startsWith('arrow')) e.preventDefault();
+  if (e.repeat) return;
+  keysHeld.add(k);
+  recomputeKeyboardInput();
+});
+window.addEventListener('keyup', e => {
+  const k = (e.key || '').toLowerCase();
+  if (keysHeld.delete(k)) recomputeKeyboardInput();
+});
+window.addEventListener('blur', () => {
+  // Clear all held keys if window loses focus (avoid stuck inputs)
+  if (keysHeld.size) { keysHeld.clear(); recomputeKeyboardInput(); }
 });
 
 // Send input at 30Hz
@@ -948,17 +1591,92 @@ function loop() {
   if (document.getElementById('gameScreen').classList.contains('active')) {
     draw();
     updateHUD();
+    updateKickoffOverlay();
+    updateRosterPopup();
   }
   requestAnimationFrame(loop);
 }
 
+let rosterOpen = false;
+document.getElementById('rosterFab').addEventListener('click', () => {
+  rosterOpen = !rosterOpen;
+  document.getElementById('rosterPopup').classList.toggle('show', rosterOpen);
+});
+function updateRosterPopup() {
+  if (!rosterOpen) return;
+  const popup = document.getElementById('rosterPopup');
+  const players = localState.game.players || [];
+  if (localState.game.mode === 'match') {
+    const red = players.filter(p => p.team === 'red');
+    const blue = players.filter(p => p.team === 'blue');
+    const fmt = arr => arr.map(p =>
+      `<div class="row${p.id===localState.playerId?' you':''}">${escapeHtml(p.name)}${p.id===localState.playerId?' (you)':''}</div>`
+    ).join('') || '<div class="row" style="opacity:0.5;">— empty —</div>';
+    popup.innerHTML =
+      '<div class="team-h red">RED ' + red.length + '</div>' + fmt(red) +
+      '<div class="team-h blue">BLUE ' + blue.length + '</div>' + fmt(blue);
+  } else {
+    const sorted = players.slice().sort((a,b) => a.strokes - b.strokes);
+    popup.innerHTML = '<div class="team-h">SCOREBOARD</div>' +
+      sorted.map(p => `<div class="row${p.id===localState.playerId?' you':''}">${escapeHtml(p.name)} · ${p.strokes}</div>`).join('');
+  }
+}
+
+// Compute interpolation factor between prev and curr server snapshots.
+// Returns t in [0, 1+]. Slight overshoot (extrapolation) is allowed up to 1.4
+// for one tick of late state; clamp to avoid drift if server stalls.
+function getLerpT() {
+  const snap = localState.snap;
+  if (!snap.curr || !snap.prev) return 1;
+  const span = Math.max(1, snap.currTime - snap.prevTime);
+  const t = (performance.now() - snap.currTime) / span + 1;
+  return Math.max(0, Math.min(1.35, t));
+}
+
+// Look up player by id in either prev or curr snapshot.
+function findInSnap(snap, id) {
+  if (!snap || !snap.players) return null;
+  for (const p of snap.players) if (p.id === id) return p;
+  return null;
+}
+
+// Build a lerped view of a player by id.
+function lerpedPlayer(curr, t) {
+  const prev = findInSnap(localState.snap.prev, curr.id) || curr;
+  const px = prev.x ?? curr.x, py = prev.y ?? curr.y;
+  return {
+    ...curr,
+    x: px + (curr.x - px) * t,
+    y: py + (curr.y - py) * t,
+    ball: curr.ball ? {
+      x: (prev.ball ? prev.ball.x : curr.ball.x) + (curr.ball.x - (prev.ball ? prev.ball.x : curr.ball.x)) * t,
+      y: (prev.ball ? prev.ball.y : curr.ball.y) + (curr.ball.y - (prev.ball ? prev.ball.y : curr.ball.y)) * t,
+    } : null,
+  };
+}
+function lerpedBall(t) {
+  const c = localState.snap.curr, p = localState.snap.prev;
+  if (!c || !c.ball) return null;
+  if (!p || !p.ball) return c.ball;
+  return {
+    x: p.ball.x + (c.ball.x - p.ball.x) * t,
+    y: p.ball.y + (c.ball.y - p.ball.y) * t,
+  };
+}
+
 function updateHUD() {
+  refreshBoostHud();
   if (localState.game.mode === 'match') {
     document.getElementById('redScore').textContent = localState.game.scoreRed || 0;
     document.getElementById('blueScore').textContent = localState.game.scoreBlue || 0;
-    const t = localState.game.matchTime || 0;
+    const elapsed = localState.game.matchTime || 0;
+    const lim = localState.game.timeLimit || 0;
+    const t = lim > 0 ? Math.max(0, lim - elapsed) : elapsed;
     const m = Math.floor(t / 60), s = Math.floor(t % 60);
-    document.getElementById('timer').textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    const timerEl = document.getElementById('timer');
+    timerEl.textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    // Visual urgency in last 30s of a timed match
+    timerEl.style.color = (lim > 0 && t <= 30 && t > 0) ? 'var(--red)' : '';
   } else if (localState.game.mode === 'golf') {
     document.getElementById('holeNum').textContent = (localState.game.currentHole || 0) + 1;
     document.getElementById('holeTotal').textContent = localState.game.totalHoles || 6;
@@ -992,10 +1710,6 @@ function draw() {
 
   if (localState.game.mode === 'match') drawMatch();
   else if (localState.game.mode === 'golf') drawGolf();
-
-  // Controls layer (display pixels)
-  ctx.setTransform(scale, 0, 0, scale, 0, 0);
-  drawControls();
 }
 
 function drawMatch() {
@@ -1004,6 +1718,7 @@ function drawMatch() {
   const gL = (W - gw) / 2, gR = (W + gw) / 2;
   // canvas is sized exactly to the arena's display dims (no letterboxing offset needed)
   const sx = displayW / W;
+  const t = getLerpT();
   ctx.save();
   ctx.scale(sx, sx);
 
@@ -1027,6 +1742,11 @@ function drawMatch() {
   ctx.fillStyle = theme.fieldLine;
   ctx.beginPath(); ctx.arc(W/2, H/2, 4, 0, Math.PI*2); ctx.fill();
 
+  // Penalty arcs (Haxball-style accent)
+  const arcR = Math.min(120, gw * 0.9);
+  ctx.beginPath(); ctx.arc(W/2, 0, arcR, 0, Math.PI); ctx.stroke();
+  ctx.beginPath(); ctx.arc(W/2, H, arcR, Math.PI, Math.PI*2); ctx.stroke();
+
   // goals
   ctx.fillStyle = hexA(theme.blue, 0.18);
   ctx.fillRect(gL, -20, gw, 22);
@@ -1041,13 +1761,35 @@ function drawMatch() {
   ctx.fillStyle = theme.fieldLine;
   [[gL,0],[gR,0],[gL,H],[gR,H]].forEach(([x,y]) => { ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI*2); ctx.fill(); });
 
-  // players
-  for (const p of (localState.game.players || [])) {
-    const c = p.team === 'red' ? theme.red : (p.team === 'blue' ? theme.blue : p.color);
-    drawPlayer(p.x, p.y, 22, c, p.boosting, p.id === localState.playerId, p.name);
+  // Own-team strip on side of field (you attack the OPPOSITE goal)
+  const me = (localState.game.players || []).find(p => p.id === localState.playerId);
+  if (me) {
+    const stripColor = me.team === 'red' ? theme.red : theme.blue;
+    ctx.fillStyle = hexA(stripColor, 0.16);
+    ctx.fillRect(0, 0, 6, H);
+    ctx.fillRect(W-6, 0, 6, H);
   }
-  // ball
-  if (localState.game.ball) drawBall(localState.game.ball.x, localState.game.ball.y, 14);
+
+  // Ball trail (rendered before ball)
+  drawBallTrail();
+
+  // Players (interpolated)
+  for (const p of (localState.game.players || [])) {
+    const lp = lerpedPlayer(p, t);
+    const c = p.team === 'red' ? theme.red : (p.team === 'blue' ? theme.blue : p.color);
+    drawPlayer(lp.x, lp.y, 22, c, p.boosting, p.id === localState.playerId, p.name);
+  }
+
+  // Ball (interpolated)
+  const ball = lerpedBall(t) || localState.game.ball;
+  if (ball) {
+    drawBall(ball.x, ball.y, 14);
+    pushBallTrail(ball.x, ball.y);
+    detectKickFlash(ball);
+  }
+
+  // Kick flash ring
+  drawKickFlash();
 
   ctx.restore();
 }
@@ -1150,11 +1892,13 @@ function drawGolf() {
   ctx.fillText((h.name||'').toUpperCase(), W/2, H-12);
   ctx.textAlign = 'left';
 
-  // players + their balls
+  // players + their balls (interpolated)
+  const t = getLerpT();
   for (const p of (localState.game.players || [])) {
     if (!p.holed) {
-      drawPlayer(p.x, p.y, 22, p.color, p.boosting, p.id === localState.playerId, p.name);
-      if (p.ball) drawBall(p.ball.x, p.ball.y, 14, p.color, p.id === localState.playerId);
+      const lp = lerpedPlayer(p, t);
+      drawPlayer(lp.x, lp.y, 22, p.color, p.boosting, p.id === localState.playerId, p.name);
+      if (lp.ball) drawBall(lp.ball.x, lp.ball.y, 14, p.color, p.id === localState.playerId);
     }
   }
 
@@ -1206,56 +1950,14 @@ function drawBall(x, y, r, ownerColor, isMine) {
   }
 }
 
-function drawControls() {
-  recomputeControlGeometry();
-  // joystick
-  if (ctrl.joyActive) {
-    ctx.globalAlpha = 0.9;
-    ctx.fillStyle = hexA(theme.accent, theme.isLight ? 0.18 : 0.22);
-    ctx.beginPath(); ctx.arc(ctrl.joyOriginX, ctrl.joyOriginY, JOY_RADIUS_DISPLAY + 14, 0, Math.PI*2); ctx.fill();
-    ctx.strokeStyle = theme.accent; ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = theme.accent;
-    ctx.beginPath(); ctx.arc(ctrl.joyStickX, ctrl.joyStickY, 26, 0, Math.PI*2); ctx.fill();
-    ctx.strokeStyle = theme.bg; ctx.lineWidth = 2; ctx.stroke();
-    ctx.globalAlpha = 1;
-  } else {
-    ctx.globalAlpha = 0.55;
-    ctx.strokeStyle = theme.isLight ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)';
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(ctrl.joyHintX, ctrl.joyHintY, JOY_HINT_R, 0, Math.PI*2); ctx.stroke();
-    ctx.fillStyle = theme.isLight ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)';
-    ctx.beginPath(); ctx.arc(ctrl.joyHintX, ctrl.joyHintY, 6, 0, Math.PI*2); ctx.fill();
-    ctx.globalAlpha = 1;
-  }
-  // boost
-  drawCircleButton(ctrl.boostX, ctrl.boostY, ctrl.boostR, theme.accent, 'BOOST', ctrl.boostPressed, true);
+// Update the boost-fill bar inside the HTML BOOST button. Called from updateHUD.
+function refreshBoostHud() {
   const me = (localState.game.players||[]).find(p => p.id === localState.playerId);
-  if (me) {
-    const frac = (me.boost || 0) / 100;
-    ctx.strokeStyle = theme.accent; ctx.lineWidth = 3; ctx.globalAlpha = 0.9;
-    ctx.beginPath();
-    ctx.arc(ctrl.boostX, ctrl.boostY, ctrl.boostR + 5, -Math.PI/2, -Math.PI/2 + frac*Math.PI*2);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-  // kick
-  drawCircleButton(ctrl.kickX, ctrl.kickY, ctrl.kickR, theme.red, 'KICK', ctrl.kickPressed, false);
-}
-
-function drawCircleButton(cx, cy, r, color, label, pressed, lightText) {
-  const sc = pressed ? 0.92 : 1;
-  const rr = r * sc;
-  ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  ctx.beginPath(); ctx.arc(cx, cy + 3, rr, 0, Math.PI*2); ctx.fill();
-  ctx.fillStyle = pressed ? color : hexA(color, 0.82);
-  ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI*2); ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = lightText ? theme.bg : '#fff';
-  const fs = Math.max(10, Math.round(rr * 0.32));
-  ctx.font = '700 ' + fs + 'px "Space Mono", monospace';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(label, cx, cy + 1);
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const fill = document.getElementById('boostFill');
+  if (!fill) return;
+  const frac = me ? (me.boost || 0) / 100 : 1;
+  fill.style.height = (frac * 100) + '%';
+  fill.style.opacity = (me && me.boosting && frac > 0) ? '0.55' : '0.18';
 }
 
 function hexA(hex, a) {
@@ -1286,15 +1988,202 @@ function addToast(text) {
   setTimeout(() => div.remove(), 4000);
 }
 
+// Ball trail: keep last N positions in arena coords, fade out.
+const BALL_TRAIL_MAX = 8;
+function pushBallTrail(x, y) {
+  const tr = localState.ballTrail;
+  const last = tr[tr.length - 1];
+  if (!last || (last.x - x) ** 2 + (last.y - y) ** 2 > 4) {
+    tr.push({ x, y });
+    if (tr.length > BALL_TRAIL_MAX) tr.shift();
+  }
+}
+function drawBallTrail() {
+  const tr = localState.ballTrail;
+  if (tr.length < 2) return;
+  for (let i = 0; i < tr.length - 1; i++) {
+    const p = tr[i];
+    const a = (i + 1) / tr.length;
+    ctx.fillStyle = `rgba(255,255,255,${0.25 * a})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 14 * (0.45 + 0.5 * a), 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// Detect when own player kicks the ball (proximity + held kick).
+// Purely cosmetic — server is the authority for actual kick application.
+function detectKickFlash(ball) {
+  const me = (localState.game.players || []).find(p => p.id === localState.playerId);
+  if (!me || !input.kicking) return;
+  const dx = ball.x - me.x, dy = ball.y - me.y;
+  const d2 = dx * dx + dy * dy;
+  const r = 22 + 14 + 12;
+  if (d2 < r * r) {
+    const now = performance.now();
+    if (!localState.kickFlash || now - localState.kickFlash.t0 > 220) {
+      localState.kickFlash = { x: ball.x, y: ball.y, t0: now };
+      audio.play('kick');
+    }
+  }
+}
+function drawKickFlash() {
+  const kf = localState.kickFlash;
+  if (!kf) return;
+  const dt = (performance.now() - kf.t0) / 280;
+  if (dt > 1) { localState.kickFlash = null; return; }
+  ctx.strokeStyle = hexA(theme.accent, 1 - dt);
+  ctx.lineWidth = 3 - dt * 2;
+  ctx.beginPath();
+  ctx.arc(kf.x, kf.y, 14 + dt * 28, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+// Kickoff countdown overlay: shows server-driven 3-2-1 / GO!
+let lastKickoffShown = 0;
+function updateKickoffOverlay() {
+  const overlay = document.getElementById('kickoffOverlay');
+  const num = document.getElementById('kickoffNum');
+  const k = localState.game.kickoff || 0;
+  if (k > 0) {
+    if (k !== lastKickoffShown) {
+      num.textContent = String(k);
+      num.style.animation = 'none'; void num.offsetWidth; num.style.animation = '';
+      audio.play('countdownBeep');
+      lastKickoffShown = k;
+    }
+    overlay.style.display = 'flex';
+  } else {
+    if (lastKickoffShown !== 0) {
+      num.textContent = 'GO!';
+      num.style.animation = 'none'; void num.offsetWidth; num.style.animation = '';
+      overlay.style.display = 'flex';
+      audio.play('go');
+      setTimeout(() => { if ((localState.game.kickoff || 0) === 0) overlay.style.display = 'none'; }, 600);
+      lastKickoffShown = 0;
+    } else {
+      overlay.style.display = 'none';
+    }
+  }
+}
+
+// Camera shake for celebration moments (CSS keyframe applied to canvas-wrap).
+function shakeCanvas() {
+  const wrap = document.getElementById('canvasWrap');
+  if (!wrap) return;
+  wrap.classList.remove('shake');
+  void wrap.offsetWidth;
+  wrap.classList.add('shake');
+  setTimeout(() => wrap.classList.remove('shake'), 500);
+}
+
+// ============== CHAT ==============
+const chatHistory = [];
+const CHAT_MAX = 40;
+function appendChat(msg) {
+  chatHistory.push(msg);
+  if (chatHistory.length > CHAT_MAX) chatHistory.shift();
+  // Lobby log
+  const log = document.getElementById('lobbyChatLog');
+  if (log) {
+    const div = document.createElement('div');
+    div.className = 'msg';
+    div.innerHTML = `<span class="who" style="color:${escapeHtml(msg.color || 'var(--accent)')}">${escapeHtml(msg.name)}:</span>${escapeHtml(msg.text)}`;
+    log.appendChild(div);
+    while (log.children.length > CHAT_MAX) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+  }
+  // In-game floating chat: show last 4 messages, auto-fade after 5s of silence
+  const gameChat = document.getElementById('gameChat');
+  if (gameChat) {
+    const tail = chatHistory.slice(-4);
+    gameChat.innerHTML = tail.map(m =>
+      `<div class="msg"><span class="who" style="color:${escapeHtml(m.color || '#fff')}">${escapeHtml(m.name)}:</span> ${escapeHtml(m.text)}</div>`
+    ).join('');
+    gameChat.classList.add('show');
+    clearTimeout(gameChat._fadeTimer);
+    gameChat._fadeTimer = setTimeout(() => gameChat.classList.remove('show'), 6000);
+  }
+}
+
+function sendChat(text) {
+  text = String(text || '').trim().slice(0, 200);
+  if (!text) return;
+  send({ type: 'chat', text });
+}
+
+// Lobby chat input
+document.getElementById('lobbyChatSend').addEventListener('click', () => {
+  const input = document.getElementById('lobbyChatInput');
+  sendChat(input.value);
+  input.value = '';
+  input.focus();
+});
+document.getElementById('lobbyChatInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    sendChat(e.target.value);
+    e.target.value = '';
+  }
+});
+
+// In-game chat
+const gameChatInputWrap = document.getElementById('gameChatInputWrap');
+const gameChatInput = document.getElementById('gameChatInput');
+function openGameChat() {
+  gameChatInputWrap.classList.add('show');
+  gameChatInput.focus();
+  // Show recent messages while composing
+  document.getElementById('gameChat').classList.add('show');
+}
+function closeGameChat() {
+  gameChatInputWrap.classList.remove('show');
+  gameChatInput.value = '';
+  gameChatInput.blur();
+}
+document.getElementById('chatFab').addEventListener('click', () => {
+  if (gameChatInputWrap.classList.contains('show')) closeGameChat(); else openGameChat();
+});
+document.getElementById('gameChatSend').addEventListener('click', () => {
+  sendChat(gameChatInput.value);
+  closeGameChat();
+});
+gameChatInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); sendChat(e.target.value); closeGameChat(); }
+  if (e.key === 'Escape') { e.preventDefault(); closeGameChat(); }
+  e.stopPropagation(); // don't let WASD bleed into movement while typing
+});
+
+// Scorer banner: "RED SCORES!" / "BLUE SCORES!" with current score (and scorer name if provided).
+function showScorerBanner(scorer, sR, sB, scorerName, ownGoal) {
+  const banner = document.getElementById('scorerBanner');
+  const scorerColor = scorer === 'red' ? theme.red : theme.blue;
+  banner.style.color = scorerColor;
+  banner.style.display = 'block';
+  const headline = scorer === 'red' ? 'RED SCORES!' : 'BLUE SCORES!';
+  let byline = '';
+  if (ownGoal && scorerName) byline = `<span class="byline">😬 OWN GOAL by ${escapeHtml(scorerName)}</span>`;
+  else if (scorerName) byline = `<span class="byline">⚽ ${escapeHtml(scorerName)}</span>`;
+  banner.innerHTML = headline + byline + `<span class="sub">${sR} – ${sB}</span>`;
+  banner.classList.remove('show'); void banner.offsetWidth; banner.classList.add('show');
+  const f = document.getElementById('flash');
+  f.style.background = scorerColor;
+  f.classList.remove('show'); void f.offsetWidth; f.classList.add('show');
+  setTimeout(() => { banner.style.display = 'none'; f.style.background = ''; }, 2400);
+}
+
 // ============== ENDGAME ==============
 function showMatchEnd(msg) {
-  const youAreRed = (localState.game.players||[]).find(p => p.id === localState.playerId)?.team === 'red';
-  const won = (msg.winner === 'red' && youAreRed) || (msg.winner === 'blue' && !youAreRed);
-  document.getElementById('endTitle').textContent = won ? 'YOU WON' : 'DEFEAT';
+  const myTeam = localState.myMatchTeam ||
+    (localState.game.players||[]).find(p => p.id === localState.playerId)?.team;
+  const draw = msg.winner === 'draw' || msg.scoreRed === msg.scoreBlue;
+  const won = !draw && myTeam ? (msg.winner === myTeam) : false;
+  document.getElementById('endTitle').textContent = draw ? 'DRAW' : (won ? 'YOU WON' : 'DEFEAT');
   document.getElementById('resultsTable').innerHTML = `
     <tr><th>RED</th><th>BLUE</th></tr>
     <tr><td style="font-size:32px;color:var(--red);">${msg.scoreRed}</td><td style="font-size:32px;color:var(--blue);">${msg.scoreBlue}</td></tr>
   `;
+  document.getElementById('rematchBtn').style.display = localState.isHost ? 'block' : 'none';
   document.getElementById('endgame').classList.add('show');
 }
 function showGolfEnd(msg) {
@@ -1310,11 +2199,17 @@ function showGolfEnd(msg) {
     </tr>`;
   });
   document.getElementById('resultsTable').innerHTML = rows;
+  document.getElementById('rematchBtn').style.display = 'none'; // golf rematch not supported
   document.getElementById('endgame').classList.add('show');
 }
 document.getElementById('backToLobbyBtn').addEventListener('click', () => {
   document.getElementById('endgame').classList.remove('show');
   showScreen('lobbyScreen');
+});
+document.getElementById('rematchBtn').addEventListener('click', () => {
+  if (!localState.isHost) return;
+  send({ type: 'rematch' });
+  document.getElementById('endgame').classList.remove('show');
 });
 
 document.getElementById('exitBtn1').addEventListener('click', leaveRoomToHome);
