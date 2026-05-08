@@ -490,6 +490,8 @@
     background: transparent; color: var(--muted);
     padding: 4px 8px; cursor: default;
     transition: all 0.15s;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(217,126,44,0.25);
   }
   .team-chip.active.red { border-color: var(--red); color: var(--red); background: rgba(200,56,56,0.08); font-weight: 700; }
   .team-chip.active.blue { border-color: var(--blue); color: var(--blue); background: rgba(45,95,184,0.08); font-weight: 700; }
@@ -762,7 +764,7 @@
       <div class="scorer-banner" id="scorerBanner" style="display:none;"></div>
       <div class="kickoff-overlay" id="kickoffOverlay" style="display:none;"><div class="kickoff-num" id="kickoffNum">3</div></div>
       <div class="key-legend" id="keyLegend" style="display:none;">
-        <kbd>WASD</kbd> MOVE · <kbd>SPACE</kbd> KICK · <kbd>SHIFT</kbd> BOOST · <kbd>T</kbd> CHAT
+        <kbd>WASD</kbd>/<kbd>↑↓←→</kbd> MOVE · <kbd>SPACE</kbd> KICK · <kbd>SHIFT</kbd> BOOST · <kbd>T</kbd> CHAT
       </div>
       <div class="game-chat" id="gameChat"></div>
       <button class="chat-fab" id="chatFab" aria-label="open chat">💬</button>
@@ -1324,15 +1326,24 @@ function updateLobby(msg) {
       `;
       if (isMe) {
         row.querySelectorAll('.team-chip[data-team]').forEach(btn => {
-          btn.addEventListener('click', () => {
+          const fire = (e) => {
+            e.preventDefault();
             if (btn.classList.contains('active')) return;
             send({ type: 'setTeam', team: btn.dataset.team });
-          });
+            audio.play('click');
+          };
+          btn.addEventListener('click', fire);
+          // Defensive: some mobile browsers swallow click on rapidly re-rendered nodes
+          btn.addEventListener('touchend', fire, { passive: false });
         });
       }
       if (canHostManageBot) {
         const rm = row.querySelector('[data-rmbot]');
-        if (rm) rm.addEventListener('click', () => send({ type: 'removeBot', id: rm.dataset.rmbot }));
+        if (rm) {
+          const fire = (e) => { e.preventDefault(); send({ type: 'removeBot', id: rm.dataset.rmbot }); };
+          rm.addEventListener('click', fire);
+          rm.addEventListener('touchend', fire, { passive: false });
+        }
       }
     } else {
       row.innerHTML = `
@@ -1386,14 +1397,19 @@ function updateLobby(msg) {
   }
 }
 
-document.getElementById('autoBalanceBtn').addEventListener('click', () => {
-  if (!localState.isHost) return;
-  send({ type: 'autoBalance' });
-});
-document.getElementById('addBotBtn').addEventListener('click', () => {
-  if (!localState.isHost) return;
-  send({ type: 'addBot' });
-});
+function bindLobbyAction(id, type) {
+  const el = document.getElementById(id);
+  const fire = (e) => {
+    e.preventDefault();
+    if (!localState.isHost) return;
+    send({ type });
+    audio.play('click');
+  };
+  el.addEventListener('click', fire);
+  el.addEventListener('touchend', fire, { passive: false });
+}
+bindLobbyAction('autoBalanceBtn', 'autoBalance');
+bindLobbyAction('addBotBtn', 'addBot');
 
 function leaveRoomToHome() {
   if (localState.ws && localState.ws.readyState === 1) {
@@ -1461,6 +1477,15 @@ function onGameStart() {
   document.getElementById('keyLegend').style.display = localState.pcMode ? 'block' : 'none';
   setTimeout(refitForCurrentMode, 50);
   window.scrollTo(0, 1);
+  // First-match hint (shown once per session; toast layer)
+  if (!sessionStorage.getItem('hb-controls-shown')) {
+    if (localState.pcMode || matchMedia('(pointer:fine)').matches) {
+      addToast('🎮 WASD or arrows to move · SPACE to kick · SHIFT to boost');
+    } else {
+      addToast('🎮 Drag on field to move · KICK / BOOST buttons below');
+    }
+    try { sessionStorage.setItem('hb-controls-shown', '1'); } catch(e){}
+  }
 }
 
 // ============== INPUT ==============
