@@ -508,6 +508,53 @@
   .roster-popup .team-h.blue { color: var(--blue); }
   .roster-popup .row { padding: 2px 0; }
   .roster-popup .row.you { color: var(--accent); font-weight: 700; }
+
+  /* Hole-complete summary overlay (golf) */
+  .hole-summary {
+    position: absolute; inset: 0;
+    display: none;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.55);
+    z-index: 11; pointer-events: none;
+  }
+  .hole-summary.show { display: flex; }
+  .hole-summary .card {
+    background: var(--bg);
+    border: 2px solid var(--accent);
+    padding: 18px 24px; min-width: 240px; max-width: 90%;
+    font-family: 'Space Mono', monospace;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  }
+  .hole-summary .card h3 {
+    margin: 0 0 4px;
+    color: var(--accent);
+    font-size: 16px; letter-spacing: 0.2em;
+    text-align: center;
+  }
+  .hole-summary .card .par-line {
+    text-align: center;
+    font-size: 10px; letter-spacing: 0.3em;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .hole-summary .card .row {
+    display: flex; justify-content: space-between; gap: 16px;
+    padding: 4px 0;
+    font-size: 12px;
+    border-bottom: 1px dashed var(--line);
+  }
+  .hole-summary .card .row:last-child { border-bottom: none; }
+  .hole-summary .card .row .name { flex: 1; }
+  .hole-summary .card .row .strokes { font-weight: 700; }
+  .hole-summary .card .row .tag {
+    min-width: 50px; text-align: right;
+    font-size: 10px; letter-spacing: 0.18em;
+  }
+  .hole-summary .card .row .tag.eagle { color: var(--accent); }
+  .hole-summary .card .row .tag.birdie { color: #4bdcb5; }
+  .hole-summary .card .row .tag.par { color: var(--muted); }
+  .hole-summary .card .row .tag.bogey { color: #f5a623; }
+  .hole-summary .card .row .tag.bad { color: var(--red); }
   .toast {
     background: var(--bg-2);
     border: 1px solid var(--line);
@@ -540,16 +587,22 @@
   .endgame-actions { display: flex; gap: 8px; margin-top: 16px; max-width: 420px; width: 100%; }
   .endgame-actions button { flex: 1; }
   .results-table {
-    width: 100%; max-width: 440px;
+    width: 100%; max-width: 720px;
     border-collapse: collapse;
     font-family: 'Space Mono', monospace;
     font-size: 12px;
   }
   .results-table th, .results-table td {
-    padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: center;
+    padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: center;
   }
-  .results-table th { color: var(--muted); font-weight: 400; font-size: 10px; letter-spacing: 0.2em; }
+  .results-table th { color: var(--muted); font-weight: 400; font-size: 10px; letter-spacing: 0.18em; }
   .results-table tr.winner td { color: var(--accent); font-weight: 700; }
+  .endgame {
+    overflow-y: auto;
+  }
+  /* Tight holes layout for many columns */
+  .results-table.golf-grid th,
+  .results-table.golf-grid td { padding: 4px 3px; font-size: 11px; }
 
   /* Team chips in lobby */
   .player-row .team-chips { margin-left: auto; display: flex; gap: 4px; }
@@ -839,8 +892,9 @@
       <div class="hud-team blue"><span class="hud-score" id="blueScore">0</span><span class="dot"></span></div>
     </div>
     <div class="hud-golf" id="golfHud" style="display:none;">
-      <span class="pill">HOLE <strong id="holeNum">1</strong>/<strong id="holeTotal">6</strong></span>
-      <span class="pill accent">YOU <strong id="myStrokes">0</strong></span>
+      <span class="pill">HOLE <strong id="holeNum">1</strong>/<strong id="holeTotal">6</strong> · PAR <strong id="holePar">3</strong></span>
+      <span class="pill accent">THIS HOLE <strong id="myStrokes">0</strong></span>
+      <span class="pill">TOTAL <strong id="myTotal">0</strong> <span id="myVsPar" style="color:var(--muted);">E</span></span>
       <span class="pill" id="leaderPill">LEAD <strong id="leaderName">-</strong></span>
       <button class="hud-back" id="exitBtn2">EXIT</button>
     </div>
@@ -859,6 +913,7 @@
         <button class="chat-fab" id="chatFab" aria-label="open chat">💬</button>
         <button class="roster-fab" id="rosterFab" aria-label="show roster" title="show roster">👥</button>
         <div class="roster-popup" id="rosterPopup"></div>
+        <div class="hole-summary" id="holeSummary"><div class="card" id="holeSummaryCard"></div></div>
         <div class="game-quick-chats hidden" id="gameQuickChats">
           <button class="quick-chat" data-msg="gg">GG</button>
           <button class="quick-chat" data-msg="nice!">NICE!</button>
@@ -1200,6 +1255,10 @@ function handleMessage(msg) {
       localState.game.currentHole = msg.hole;
       localState.game.holeData = msg.holeData;
       flashGoalText('HOLE ' + (msg.hole + 1), theme.accent);
+      hideHoleSummary();
+      break;
+    case 'holeComplete':
+      showHoleSummary(msg);
       break;
     case 'goal':
       localState.game.scoreRed = msg.scoreRed;
@@ -1792,9 +1851,24 @@ function updateRosterPopup() {
       '<div class="team-h red">RED ' + red.length + '</div>' + fmt(red) +
       '<div class="team-h blue">BLUE ' + blue.length + '</div>' + fmt(blue);
   } else {
-    const sorted = players.slice().sort((a,b) => a.strokes - b.strokes);
-    popup.innerHTML = '<div class="team-h">SCOREBOARD</div>' +
-      sorted.map(p => `<div class="row${p.id===localState.playerId?' you':''}">${escapeHtml(p.name)} · ${p.strokes}</div>`).join('');
+    // Golf scoreboard: sort by TOTAL strokes (across all completed + current hole)
+    const sorted = players.slice().sort((a,b) => (a.totalStrokes||0) - (b.totalStrokes||0));
+    let html = '<div class="team-h">SCOREBOARD</div>';
+    sorted.forEach((p, i) => {
+      const ts = p.totalStrokes || 0;
+      const tp = p.totalPar || 0;
+      const inProgress = p.holed ? 0 : (p.strokes || 0);
+      const completedTotal = ts - inProgress;
+      const diff = completedTotal - tp;
+      const diffStr = (p.thru || 0) === 0 ? '—' : (diff === 0 ? 'E' : (diff > 0 ? '+' + diff : '' + diff));
+      const meCls = (p.id === localState.playerId ? ' you' : '');
+      const finished = p.holed ? ' ✓' : '';
+      html += `<div class="row${meCls}">
+        ${i+1}. ${escapeHtml(p.name)}${finished}
+        <span style="float:right; opacity:0.8;">${ts} (${diffStr})</span>
+      </div>`;
+    });
+    popup.innerHTML = html;
   }
 }
 
@@ -1870,13 +1944,39 @@ function updateHUD() {
   } else if (localState.game.mode === 'golf') {
     document.getElementById('holeNum').textContent = (localState.game.currentHole || 0) + 1;
     document.getElementById('holeTotal').textContent = localState.game.totalHoles || 6;
-    const me = (localState.game.players || []).find(p => p.id === localState.playerId);
-    document.getElementById('myStrokes').textContent = me ? me.strokes : 0;
-    // leader
+    document.getElementById('holePar').textContent = localState.game.currentPar || '-';
     const players = (localState.game.players || []).slice();
+    const me = players.find(p => p.id === localState.playerId);
+    document.getElementById('myStrokes').textContent = me ? (me.strokes || 0) : 0;
+    // Total + vs par for me
+    const myTotalEl = document.getElementById('myTotal');
+    const myVsParEl = document.getElementById('myVsPar');
+    if (me && typeof me.totalStrokes === 'number') {
+      myTotalEl.textContent = me.totalStrokes;
+      // vs par counts only completed holes (server's totalPar is of completed holes only)
+      const diff = me.totalStrokes - (me.totalPar || 0);
+      // For incomplete current hole, only show diff if at least one hole completed
+      if ((me.thru || 0) === 0) {
+        myVsParEl.textContent = '—';
+        myVsParEl.style.color = 'var(--muted)';
+      } else {
+        // Diff includes current-hole-in-progress strokes which haven't been
+        // par-adjusted yet. To avoid scaring users, just show vs par for
+        // COMPLETED holes by subtracting in-progress strokes.
+        const inProgress = me.holed ? 0 : (me.strokes || 0);
+        const cleanDiff = (me.totalStrokes - inProgress) - (me.totalPar || 0);
+        const tag = cleanDiff === 0 ? 'E' : (cleanDiff > 0 ? '+' + cleanDiff : '' + cleanDiff);
+        myVsParEl.textContent = tag;
+        myVsParEl.style.color = cleanDiff < 0 ? 'var(--accent)' : (cleanDiff > 0 ? 'var(--red)' : 'var(--muted)');
+      }
+    } else {
+      myTotalEl.textContent = '0';
+      myVsParEl.textContent = '—';
+    }
+    // Leader by total strokes (lower is better)
     if (players.length) {
-      players.sort((a, b) => a.strokes - b.strokes);
-      document.getElementById('leaderName').textContent = players[0].name.slice(0, 8);
+      players.sort((a, b) => (a.totalStrokes || 0) - (b.totalStrokes || 0));
+      document.getElementById('leaderName').textContent = players[0].name.slice(0, 10);
     }
   }
 }
@@ -2333,6 +2433,43 @@ function updateAndDrawParticles() {
   ctx.globalAlpha = 1;
 }
 
+// Hole-complete summary overlay (golf): shows a card with each player's
+// score for the just-finished hole, sorted lowest strokes first. Auto-hides
+// when the next hole's 'newHole' message arrives (server pauses ~2.2s).
+function showHoleSummary(msg) {
+  const wrap = document.getElementById('holeSummary');
+  const card = document.getElementById('holeSummaryCard');
+  if (!wrap || !card || !msg) return;
+  const sorted = (msg.summary || []).slice().sort((a, b) => (a.strokes || 0) - (b.strokes || 0));
+  const par = msg.par || 0;
+  const tagFor = (strokes, par) => {
+    if (strokes === 1) return { text: 'HOLE-IN-1', cls: 'eagle' };
+    const d = strokes - par;
+    if (d <= -2) return { text: 'EAGLE', cls: 'eagle' };
+    if (d === -1) return { text: 'BIRDIE', cls: 'birdie' };
+    if (d === 0)  return { text: 'PAR', cls: 'par' };
+    if (d === 1)  return { text: 'BOGEY', cls: 'bogey' };
+    return { text: '+' + d, cls: 'bad' };
+  };
+  let html = `<h3>HOLE ${ (msg.hole||0) + 1 } DONE</h3>`;
+  html += `<div class="par-line">${escapeHtml(msg.holeName || '')} · PAR ${par}</div>`;
+  for (const r of sorted) {
+    const t = tagFor(r.strokes || 0, par);
+    const isMe = r.id === localState.playerId;
+    html += `<div class="row${isMe ? ' you' : ''}">
+      <span class="name" style="color:${isMe ? 'var(--accent)' : escapeHtml(r.color || '#fff')}">${escapeHtml(r.name)}</span>
+      <span class="strokes">${r.strokes}</span>
+      <span class="tag ${t.cls}">${t.text}</span>
+    </div>`;
+  }
+  card.innerHTML = html;
+  wrap.classList.add('show');
+}
+function hideHoleSummary() {
+  const wrap = document.getElementById('holeSummary');
+  if (wrap) wrap.classList.remove('show');
+}
+
 // Camera shake for celebration moments (CSS keyframe applied to canvas-wrap).
 function shakeCanvas() {
   const wrap = document.getElementById('canvasWrap');
@@ -2518,16 +2655,57 @@ function showMatchEnd(msg) {
 }
 function showGolfEnd(msg) {
   document.getElementById('endTitle').textContent = 'FINAL RESULTS';
-  let rows = '<tr><th>#</th><th>NAME</th><th>STROKES</th><th>VS PAR</th></tr>';
+  // Determine total holes from any player's card length
+  const holeCount = Math.max(0, ...(msg.results || []).map(r => (r.card || []).length));
+
+  // Header row: # | NAME | H1 | H2 | ... | TOT | VS
+  let header = '<tr><th>#</th><th style="text-align:left;">NAME</th>';
+  for (let i = 0; i < holeCount; i++) header += `<th>H${i+1}</th>`;
+  header += '<th>TOT</th><th>VS</th></tr>';
+
+  // Par row (showing each hole's par)
+  let parRow = `<tr><td></td><td style="text-align:left; color:var(--muted);">PAR</td>`;
+  if (msg.results.length && msg.results[0].card) {
+    for (let i = 0; i < holeCount; i++) {
+      const e = msg.results[0].card[i];
+      parRow += `<td style="color:var(--muted);">${e ? e.par : '-'}</td>`;
+    }
+  }
+  let totalParAll = 0;
+  if (msg.results.length && msg.results[0].card) {
+    for (const e of msg.results[0].card) totalParAll += e.par;
+  }
+  parRow += `<td style="color:var(--muted);">${totalParAll}</td><td></td></tr>`;
+
+  // Player rows
+  let rows = header + parRow;
   msg.results.forEach((r, i) => {
-    const ts = r.diff === 0 ? 'E' : (r.diff > 0 ? '+'+r.diff : ''+r.diff);
-    rows += `<tr class="${i === 0 ? 'winner' : ''}">
-      <td>${i+1}</td>
-      <td style="text-align:left;color:${r.color}">${escapeHtml(r.name)}${r.playerId === localState.playerId ? ' (you)' : ''}</td>
-      <td>${r.total}</td>
-      <td>${ts}</td>
-    </tr>`;
+    const diffStr = r.diff === 0 ? 'E' : (r.diff > 0 ? '+' + r.diff : '' + r.diff);
+    const diffColor = r.diff < 0 ? 'var(--accent)' : (r.diff > 0 ? 'var(--red)' : 'var(--muted)');
+    let row = `<tr class="${i === 0 ? 'winner' : ''}">`;
+    row += `<td>${i+1}</td>`;
+    row += `<td style="text-align:left; color:${r.color};">${escapeHtml(r.name)}${r.playerId === localState.playerId ? ' (you)' : ''}</td>`;
+    for (let h = 0; h < holeCount; h++) {
+      const e = r.card[h];
+      let cell = e ? e.strokes : '-';
+      // Color cell based on score vs par
+      let cellColor = 'var(--ink)';
+      if (e) {
+        const d = e.strokes - e.par;
+        if (e.strokes === 1) cellColor = 'var(--accent)';
+        else if (d <= -2) cellColor = 'var(--accent)';
+        else if (d === -1) cellColor = '#4bdcb5';
+        else if (d === 1)  cellColor = '#f5a623';
+        else if (d > 1)    cellColor = 'var(--red)';
+      }
+      row += `<td style="color:${cellColor};">${cell}</td>`;
+    }
+    row += `<td><strong>${r.total}</strong></td>`;
+    row += `<td style="color:${diffColor};">${diffStr}</td>`;
+    row += '</tr>';
+    rows += row;
   });
+
   document.getElementById('resultsTable').innerHTML = rows;
   document.getElementById('rematchBtn').style.display = 'none'; // golf rematch not supported
   document.getElementById('endgame').classList.add('show');

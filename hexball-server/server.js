@@ -924,6 +924,26 @@ class Room {
     // If everyone done, advance hole
     if (this.holeCompletePlayers.size === this.players.size) {
       this.goalCelebration = TICK_HZ * 2; // brief pause
+      // Send a clean per-hole summary so clients can render an end-of-hole popup.
+      const summary = [...this.players.values()].map(pp => {
+        const card = this.scorecards.get(pp.id) || [];
+        const last = card[card.length - 1];
+        let total = 0, totalPar = 0;
+        for (const c of card) { total += c.strokes; totalPar += c.par; }
+        return {
+          id: pp.id, name: pp.name, color: pp.color,
+          strokes: last ? last.strokes : 0,
+          par: last ? last.par : 0,
+          total, totalPar,
+        };
+      });
+      this.broadcast({
+        type: 'holeComplete',
+        hole: this.currentHole,
+        holeName: h.name,
+        par: h.par,
+        summary,
+      });
       setTimeout(() => {
         if (this.state !== 'playing') return;
         this.currentHole++;
@@ -1197,6 +1217,17 @@ class Room {
           y: Math.round(p.ball.y * 10) / 10,
         };
       }
+      // Golf: include running totals so the client can render a clear scoreboard
+      if (this.mode === 'golf' && this.scorecards) {
+        const card = this.scorecards.get(p.id) || [];
+        let total = 0, totalPar = 0;
+        for (const c of card) { total += c.strokes; totalPar += c.par; }
+        // Add current-hole strokes-in-progress (until the player sinks)
+        const includeCurrent = !this.holeCompletePlayers.has(p.id);
+        o.totalStrokes = total + (includeCurrent ? (p.strokes || 0) : 0);
+        o.totalPar = totalPar; // par for COMPLETED holes only
+        o.thru = card.length;  // holes completed
+      }
       players.push(o);
     }
     const msg = {
@@ -1229,6 +1260,11 @@ class Room {
     } else {
       msg.currentHole = this.currentHole;
       msg.totalHoles = this.golfOpts.courseLength;
+      const cur = this.activeCourses && this.activeCourses[this.currentHole];
+      if (cur) {
+        msg.currentPar = cur.par;
+        msg.holeName = cur.name;
+      }
     }
     this.broadcast(msg);
   }
