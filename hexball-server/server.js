@@ -1012,13 +1012,17 @@ class Room {
       if (this.mode === 'match') {
         this.collidePlayerBall(p, this.matchBall, T);
       } else {
-        // Golf: skip the player↔ball collision when the ball is over the cup so
-        // a player standing on the hole can't body-block the putt. The hole's
-        // own absorption logic in updateGolfBall takes over from there.
-        const overCup = (b) => Math.hypot(b.x - hole.hole.x, b.y - hole.hole.y) < hole.hole.r + 8;
-        if (p.ball && !overCup(p.ball)) this.collidePlayerBall(p, p.ball, T);
+        // Golf: skip the player↔ball collision when the ball is anywhere within
+        // the player+ball collision radius from the cup. The previous threshold
+        // (hole.r + 8 = 30) was smaller than player.r + ball.r (36), which meant
+        // a player parked on the cup could still body-block the ball just before
+        // it entered the absorption zone. We now use 44 (= 36 + 8 margin) so the
+        // ball CAN ALWAYS reach the cup regardless of who's standing on it.
+        const HOLE_PHASE_R = PLAYER_R + BALL_R + 8;
+        const nearCup = (b) => Math.hypot(b.x - hole.hole.x, b.y - hole.hole.y) < HOLE_PHASE_R;
+        if (p.ball && !nearCup(p.ball)) this.collidePlayerBall(p, p.ball, T);
         for (const other of this.players.values()) {
-          if (other.id !== p.id && other.ball && !this.holeCompletePlayers.has(other.id) && !overCup(other.ball)) {
+          if (other.id !== p.id && other.ball && !this.holeCompletePlayers.has(other.id) && !nearCup(other.ball)) {
             this.collidePlayerBall(p, other.ball, T);
           }
         }
