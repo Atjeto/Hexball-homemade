@@ -16,22 +16,24 @@ const BALL_R = 14;
 const SUBSTEPS = 6;
 
 const MATCH_TUNING = {
-  // Movement tuned for "less wind-up" feel: faster acceleration ramp so the
-  // player reaches top speed in ~3-4 ticks (~120 ms) and a slightly tighter
-  // friction so they stop quickly. Top speed nudged down a hair to keep the
-  // overall pace similar without the slippery glide.
+  // Movement: snappy ramp, tight friction, ~natural feel.
   fp: 0.87, fb: 0.992,
   accel: 0.82, accelB: 1.30,
   max: 4.7, maxB: 7.5,
-  kick: 7.0, bounce: 0.7,
-  ballBounce: 0.85, ballMax: 11.5,
+  kick: 7.0,
+  // Walls now absorb most energy on impact instead of pinball-ricocheting.
+  bounce: 0.55,        // player off walls
+  ballBounce: 0.62,    // ball off walls
+  ballMax: 11.5,
 };
 const GOLF_TUNING = {
   fp: 0.90, fb: 0.978,
   accel: 0.50, accelB: 0.85,
   max: 4.0, maxB: 6.5,
-  kick: 6.0, bounce: 0.65,
-  ballBounce: 0.82, ballMax: 9.5,
+  kick: 6.0,
+  bounce: 0.50,
+  ballBounce: 0.55,
+  ballMax: 9.5,
 };
 
 const TEAM_COLORS = ['#e54b4b', '#4b8bf5', '#5ec678', '#d44ba8', '#f5a623', '#7e57c2'];
@@ -220,9 +222,17 @@ class Room {
     this.goalLog = []; // [{minute, scorerName, ownGoal, assistName, scorer}]
   }
 
-  recordBallTouch(p) {
+  // Records that a player touched a specific ball. With multi-ball, we now
+  // attribute scorers/assists to the BALL THAT SCORED, not whichever ball was
+  // touched most recently (which could be a different one).
+  recordBallTouch(p, ball) {
     if (this.mode !== 'match') return;
-    this.lastBallTouch = { id: p.id, name: p.name, team: p.team };
+    const touch = { id: p.id, name: p.name, team: p.team };
+    // Per-ball lastTouch (used by onMatchGoal / onMultiGoal)
+    if (ball) ball._lastTouch = touch;
+    // Keep room-level lastBallTouch as a convenient fallback for the matchBall
+    if (!ball || ball === this.matchBall) this.lastBallTouch = touch;
+    // Single shared touch history for assist credit
     const last = this.touchHistory[this.touchHistory.length - 1];
     if (!last || last.id !== p.id) {
       this.touchHistory.push({ id: p.id, name: p.name, team: p.team, t: Date.now() });
@@ -569,16 +579,22 @@ class Room {
 
   // ---------- MATCH MODE ----------
   // Compose the live tuning, applying ball-style modifiers if any.
+  // The three styles aim for visibly distinct feel:
+  //   normal — balanced, walls absorb most energy
+  //   bouncy — walls REFLECT MORE than they absorb (energy-positive); pinball
+  //   ice    — very low friction, very SOFT walls; slides forever, dies on walls
   effectiveMatchTuning() {
     const style = this.matchOpts.ballStyle || 'normal';
     if (style === 'bouncy') {
-      // Energy-GAIN bounces: ball gets faster off walls. Capped via clampSpeed
-      // inside substeps so it doesn't go to infinity.
-      return { ...MATCH_TUNING, ballBounce: 1.05, ballMax: 14.5, fb: 0.997 };
+      // Bouncy: walls accelerate the ball. Capped via clampSpeed inside substeps.
+      // Friction stays moderate so you can still see the bouncing build-up.
+      return { ...MATCH_TUNING, ballBounce: 1.20, ballMax: 14.5, fb: 0.995 };
     }
     if (style === 'ice') {
-      // Almost frictionless ball — slides forever, glassy feel.
-      return { ...MATCH_TUNING, fb: 0.999, ballBounce: 0.92, ballMax: 12 };
+      // Ice: nearly frictionless ball that GLIDES. Walls absorb most energy
+      // so it doesn't ricochet — it dies softly into the wall and slides
+      // along the floor. Very different feel from bouncy.
+      return { ...MATCH_TUNING, fb: 0.9985, ballBounce: 0.30, ballMax: 12.5 };
     }
     return MATCH_TUNING;
   }
@@ -657,10 +673,12 @@ class Room {
   }
 
   // Goal scored on an EXTRA ball — award the team but keep the match running.
+  // Uses the SCORING ball's own _lastTouch (not the room-level fallback) so
+  // multi-ball goals correctly credit whoever moved that specific ball.
   onMultiGoal(scorer, ball, W, H) {
     if (scorer === 'red') this.scoreRed++; else this.scoreBlue++;
     this.lastScorer = scorer;
-    const lt = this.lastBallTouch;
+    const lt = ball._lastTouch || null;
     const ownGoal = !!(lt && lt.team && lt.team !== scorer);
     if (lt && !ownGoal) {
       const sp = this.players.get(lt.id); if (sp) sp.goals = (sp.goals||0) + 1;
@@ -676,13 +694,13 @@ class Room {
       scoreRed: this.scoreRed, scoreBlue: this.scoreBlue,
       scorerName: lt ? lt.name : null, ownGoal, assistName: null,
     });
-    this.lastBallTouch = null;
     if (this.scoreRed >= this.matchOpts.goalsToWin || this.scoreBlue >= this.matchOpts.goalsToWin) {
       this.endMatch();
       return;
     }
-    // Respawn this single ball at center
+    // Respawn this single ball at center; clear its touch history.
     ball.x = W / 2; ball.y = H / 2; ball.vx = 0; ball.vy = 0;
+    ball._lastTouch = null;
   }
 
   // Landscape ball physics:
@@ -723,7 +741,9 @@ class Room {
   onMatchGoal(scorer) {
     if (scorer === 'red') this.scoreRed++; else this.scoreBlue++;
     this.lastScorer = scorer;
-    const lt = this.lastBallTouch;
+    // Prefer the matchBall's own lastTouch (in case multi-ball is active and
+    // the room-level lastBallTouch is from a different ball).
+    const lt = (this.matchBall && this.matchBall._lastTouch) || this.lastBallTouch;
     const ownGoal = !!(lt && lt.team && lt.team !== scorer);
 
     // Tally per-player stats and find an assister.
@@ -1053,31 +1073,40 @@ class Room {
     if (p.input.boosting && (ax !== 0 || ay !== 0)) p.boost = Math.max(0, p.boost - 2.4);
     else p.boost = Math.min(100, p.boost + 0.7);
 
-    // kick
+    // Kick — for human players, fires AT MOST ONCE per press. Holding the
+    // button no longer rapid-fires every tick (which previously caused
+    // touch-then-kick to count as multiple strokes in golf). Bots are exempt
+    // from the rising-edge rule because they don't accumulate strokes and
+    // need continuous-kick behavior to consistently push balls.
+    const isBot = !!p.isBot;
     if (p.input.kicking) {
-      const target = (this.mode === 'match') ? this.matchBall : p.ball;
-      // for golf, can also kick adjacent balls (own or others)
-      const kickables = (this.mode === 'match') ? [this.matchBall] : (
-        [...this.players.values()].filter(o => o.ball && !this.holeCompletePlayers.has(o.id)).map(o => o.ball)
-      );
-      let kicked = false;
-      for (const b of kickables) {
-        const d = dist(p, b);
-        if (d < p.r + b.r + 12) {
-          const dx = b.x - p.x, dy = b.y - p.y;
-          const dn = Math.hypot(dx, dy) || 1;
-          b.vx += (dx / dn) * T.kick;
-          b.vy += (dy / dn) * T.kick;
-          clampSpeed(b, T.ballMax);
-          // strokes only count for OWN ball in golf
-          if (this.mode === 'golf' && b === p.ball && !kicked) {
-            p.strokes++;
-            p.lastKickPos = { x: b.x, y: b.y };
+      if (p._kickArmed === undefined) p._kickArmed = true;
+      if (isBot || p._kickArmed) {
+        const kickables = (this.mode === 'match') ? [this.matchBall] : (
+          [...this.players.values()].filter(o => o.ball && !this.holeCompletePlayers.has(o.id)).map(o => o.ball)
+        );
+        let kicked = false;
+        for (const b of kickables) {
+          const d = dist(p, b);
+          if (d < p.r + b.r + 12) {
+            const dx = b.x - p.x, dy = b.y - p.y;
+            const dn = Math.hypot(dx, dy) || 1;
+            b.vx += (dx / dn) * T.kick;
+            b.vy += (dy / dn) * T.kick;
+            clampSpeed(b, T.ballMax);
+            // Strokes only count for the player's OWN ball in golf
+            if (this.mode === 'golf' && b === p.ball && !kicked) {
+              p.strokes++;
+              p.lastKickPos = { x: b.x, y: b.y };
+            }
+            if (this.mode === 'match') this.recordBallTouch(p, b);
+            kicked = true;
           }
-          if (this.mode === 'match') this.recordBallTouch(p);
-          kicked = true;
         }
+        if (kicked && !isBot) p._kickArmed = false; // disarm until release
       }
+    } else {
+      p._kickArmed = true; // re-arm on release
     }
   }
 
@@ -1098,8 +1127,11 @@ class Room {
         ball.vx -= (1 + restitution) * dot * nx;
         ball.vy -= (1 + restitution) * dot * ny;
         clampSpeed(ball, T.ballMax);
-        if (this.mode === 'match' && ball === this.matchBall) {
-          this.recordBallTouch(p);
+        // Match: any ball that's part of the field (matchBall or extra) records a touch.
+        // The per-ball lastTouch lets multi-ball goals correctly credit the
+        // player who actually moved the SCORING ball.
+        if (this.mode === 'match' && (ball === this.matchBall || (this.extraBalls && this.extraBalls.includes(ball)))) {
+          this.recordBallTouch(p, ball);
         }
       }
     }
