@@ -17,14 +17,15 @@ const SUBSTEPS = 6;
 
 const MATCH_TUNING = {
   // Movement: snappy ramp, tight friction, ~natural feel.
+  // Slightly faster than the previous round — top speed up ~7%, boost top up ~7%.
   fp: 0.87, fb: 0.992,
-  accel: 0.82, accelB: 1.30,
-  max: 4.7, maxB: 7.5,
-  kick: 7.0,
-  // Walls now absorb most energy on impact instead of pinball-ricocheting.
+  accel: 0.90, accelB: 1.45,
+  max: 5.05, maxB: 8.05,
+  kick: 7.2,
+  // Walls absorb most energy on impact instead of pinball-ricocheting.
   bounce: 0.55,        // player off walls
   ballBounce: 0.62,    // ball off walls
-  ballMax: 11.5,
+  ballMax: 12.0,
 };
 const GOLF_TUNING = {
   fp: 0.90, fb: 0.978,
@@ -1070,8 +1071,11 @@ class Room {
     }
 
     // boost regen
-    if (p.input.boosting && (ax !== 0 || ay !== 0)) p.boost = Math.max(0, p.boost - 2.4);
-    else p.boost = Math.min(100, p.boost + 0.7);
+    // Boost economy:
+    //   drain  1.4/tick → ~2.4 s of full-tank boost (was 1.4 s)
+    //   regen  1.1/tick → ~3.0 s for a full recharge (was 4.8 s)
+    if (p.input.boosting && (ax !== 0 || ay !== 0)) p.boost = Math.max(0, p.boost - 1.4);
+    else p.boost = Math.min(100, p.boost + 1.1);
 
     // Kick — for human players, fires AT MOST ONCE per press. Holding the
     // button no longer rapid-fires every tick (which previously caused
