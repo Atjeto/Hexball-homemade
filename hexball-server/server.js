@@ -1604,6 +1604,29 @@ process.on('unhandledRejection', (err) => {
   process.exit(1);
 });
 
+// Graceful shutdown: tell every connected client we're going down so the UI can
+// show a "be right back" toast instead of just silently dropping the socket.
+let shuttingDown = false;
+function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log('Received ' + signal + ' — broadcasting shutdown to ' + rooms.size + ' rooms');
+  try {
+    for (const room of rooms.values()) {
+      try { room.broadcast({ type: 'serverShutdown', message: 'server restarting — try reconnecting in a few seconds' }); } catch(e){}
+      try { room.stop(); } catch(e){}
+    }
+  } catch (e) { /* swallow */ }
+  // Give sockets ~1s to flush, then close everything down.
+  setTimeout(() => {
+    try { wss.close(); } catch(e){}
+    try { httpServer.close(() => process.exit(0)); } catch(e){}
+    setTimeout(() => process.exit(0), 1000); // hard exit if close hangs
+  }, 1200);
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
+
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Hexball server listening on 0.0.0.0:${PORT}`);
   console.log(`Node ${process.version}, public dir: ${PUBLIC}`);

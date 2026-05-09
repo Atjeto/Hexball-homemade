@@ -1306,6 +1306,9 @@ function handleMessage(msg) {
     case 'playerLeft':
       addToast('← ' + msg.name + ' left');
       break;
+    case 'serverShutdown':
+      addToast('⚙ ' + (msg.message || 'server restarting…'));
+      break;
     case 'error':
       document.getElementById('joinError').textContent = msg.message;
       // also clear after a few seconds
