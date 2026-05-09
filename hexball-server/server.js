@@ -263,6 +263,9 @@ class Room {
   addPlayer(id, ws, name) {
     const teamColor = TEAM_COLORS[this.players.size % TEAM_COLORS.length];
     const team = this.pickJoinTeam();
+    // Random secret used to authenticate a future reconnect from a client that
+    // has stored its playerId. Without this, anyone could spoof a rejoin.
+    const secret = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
     const p = {
       id, ws, name: this.uniqueName(name),
       team, color: teamColor,
@@ -274,6 +277,8 @@ class Room {
       lastKickPos: null,
       ready: false,
       isBot: false,
+      secret,
+      disconnectedAt: 0, // 0 = currently connected
     };
     this.players.set(id, p);
     return p;
@@ -1427,7 +1432,8 @@ setInterval(() => {
 }, 60000);
 
 wss.on('connection', (ws, req) => {
-  const playerId = String(nextPlayerId++);
+  // playerId is mutable: a successful rejoin replaces it with the old slot's id.
+  let playerId = String(nextPlayerId++);
   const ip = clientIp(req);
   let currentRoom = null;
   let alive = true;
@@ -1459,10 +1465,10 @@ wss.on('connection', (ws, req) => {
 
         if (currentRoom) leaveRoom();
         const room = createRoom(playerId, msg.mode || 'match', msg.opts || {});
-        room.addPlayer(playerId, ws, msg.name);
+        const player = room.addPlayer(playerId, ws, msg.name);
         playerRooms.set(playerId, room.code);
         currentRoom = room;
-        ws.send(JSON.stringify({ type: 'roomCreated', code: room.code }));
+        ws.send(JSON.stringify({ type: 'roomCreated', code: room.code, secret: player.secret }));
         room.sendLobbyState();
         break;
       }
@@ -1482,10 +1488,10 @@ wss.on('connection', (ws, req) => {
           ws.send(JSON.stringify({ type: 'error', message: 'Room is full' }));
           break;
         }
-        room.addPlayer(playerId, ws, msg.name);
+        const player = room.addPlayer(playerId, ws, msg.name);
         playerRooms.set(playerId, room.code);
         currentRoom = room;
-        ws.send(JSON.stringify({ type: 'roomJoined', code: room.code }));
+        ws.send(JSON.stringify({ type: 'roomJoined', code: room.code, secret: player.secret }));
         room.sendLobbyState();
         break;
       }
@@ -1585,7 +1591,48 @@ wss.on('connection', (ws, req) => {
         break;
       }
       case 'leaveRoom': {
-        leaveRoom();
+        // Hard leave (user clicked exit) — drop the slot immediately.
+        leaveRoom({ hard: true });
+        break;
+      }
+      case 'rejoin': {
+        // Reconnect handler: client passes its old { playerId, secret, code }
+        // from localStorage. If the slot is still alive (within grace period),
+        // re-bind this socket to it.
+        if (currentRoom) break; // already in a room
+        const code = (msg.code || '').toUpperCase();
+        const oldId = String(msg.playerId || '');
+        const secret = String(msg.secret || '');
+        const room = rooms.get(code);
+        if (!room) {
+          ws.send(JSON.stringify({ type: 'rejoinFailed', reason: 'room not found' }));
+          break;
+        }
+        const old = room.players.get(oldId);
+        if (!old || old.secret !== secret) {
+          ws.send(JSON.stringify({ type: 'rejoinFailed', reason: 'no matching slot' }));
+          break;
+        }
+        // Even if old.disconnectedAt === 0 (slot still has an active socket),
+        // accept the rejoin: assume the old socket is dead/dueling. Replace it.
+        try { if (old.ws && old.ws !== ws) old.ws.terminate(); } catch(e){}
+        old.ws = ws;
+        old.disconnectedAt = 0;
+        // Adopt the old playerId for this connection. All subsequent input/chat
+        // messages from this ws will be associated with the recovered slot.
+        playerId = oldId;
+        currentRoom = room;
+        playerRooms.set(playerId, room.code);
+        ws.send(JSON.stringify({
+          type: 'rejoinSuccess',
+          playerId, code: room.code,
+          mode: room.mode, state: room.state, isHost: room.hostId === playerId,
+          secret: old.secret,
+        }));
+        room.sendLobbyState();
+        // If the room is mid-game, pump a fresh state immediately so the
+        // client doesn't sit on a blank screen waiting for the next 30Hz tick.
+        if (room.state === 'playing') room.broadcastState();
         break;
       }
       case 'chat': {
@@ -1611,31 +1658,84 @@ wss.on('connection', (ws, req) => {
     }
   });
 
-  function leaveRoom() {
+  // Hard leave (`hard: true`): immediately remove the player slot from the
+  // room. Soft leave (default on socket close): mark the slot as disconnected
+  // but keep it for a 30s grace period so the player can reconnect with their
+  // stored playerId+secret. The reaper interval below cleans up expired slots.
+  function leaveRoom(opts) {
     if (!currentRoom) return;
+    opts = opts || {};
     const leaver = currentRoom.players.get(playerId);
     const wasPlaying = currentRoom.state === 'playing';
     const leaverName = leaver ? leaver.name : null;
-    const empty = currentRoom.removePlayer(playerId);
-    if (empty) {
-      currentRoom.stop();
-      rooms.delete(currentRoom.code);
-    } else {
-      if (wasPlaying && leaverName) {
-        currentRoom.broadcast({ type: 'playerLeft', name: leaverName });
+
+    if (opts.hard || !leaver) {
+      // Hard remove (explicit user intent or no slot anyway).
+      const empty = currentRoom.removePlayer(playerId);
+      if (empty) {
+        currentRoom.stop();
+        rooms.delete(currentRoom.code);
+      } else {
+        if (wasPlaying && leaverName) {
+          currentRoom.broadcast({ type: 'playerLeft', name: leaverName });
+        }
+        currentRoom.sendLobbyState();
       }
+      playerRooms.delete(playerId);
+    } else {
+      // Soft disconnect: keep slot, mark as disconnected, freeze input.
+      leaver.ws = null;
+      leaver.disconnectedAt = Date.now();
+      leaver.input.ax = 0; leaver.input.ay = 0;
+      leaver.input.kicking = false; leaver.input.boosting = false;
+      // If the host disconnected, promote the next non-disconnected non-bot
+      // player so the lobby/match isn't frozen while waiting for them.
+      if (currentRoom.hostId === playerId) {
+        let newHost = null;
+        for (const p of currentRoom.players.values()) {
+          if (!p.isBot && !p.disconnectedAt && p.id !== playerId) { newHost = p.id; break; }
+        }
+        if (newHost) currentRoom.hostId = newHost;
+      }
+      // Notify the room — others see "left (reconnecting)" without losing the slot.
+      if (leaverName) currentRoom.broadcast({ type: 'playerLeft', name: leaverName + ' (reconnecting…)' });
       currentRoom.sendLobbyState();
+      // Don't delete playerRooms entry: it still maps oldPid -> roomCode for rejoin.
     }
-    playerRooms.delete(playerId);
     currentRoom = null;
   }
 
   ws.on('close', () => {
     clearInterval(pingInterval);
-    leaveRoom();
+    leaveRoom(); // soft by default — rejoin window opens
   });
   ws.on('error', () => {});
 });
+
+// Reaper: every 5s, hard-remove slots that have been disconnected longer than
+// the grace period. This is the only path that finalizes a soft disconnect.
+const RECONNECT_GRACE_MS = 30000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, room] of rooms) {
+    let removed = false;
+    for (const [pid, p] of [...room.players]) {
+      if (p.disconnectedAt && now - p.disconnectedAt > RECONNECT_GRACE_MS) {
+        const wasPlaying = room.state === 'playing';
+        const empty = room.removePlayer(pid);
+        if (wasPlaying) try { room.broadcast({ type: 'playerLeft', name: p.name }); } catch(e){}
+        playerRooms.delete(pid);
+        removed = true;
+        if (empty) {
+          try { room.stop(); } catch(e){}
+          rooms.delete(code);
+          break; // skip the rest of this room
+        }
+      }
+    }
+    if (removed && rooms.has(code)) try { room.sendLobbyState(); } catch(e){}
+  }
+}, 5000);
 
 // Global crash handlers so failures show up in logs instead of silent exits
 process.on('uncaughtException', (err) => {

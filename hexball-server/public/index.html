@@ -1181,7 +1181,16 @@ function connect() {
     connStatus.classList.add('connected');
     connStatus.classList.remove('error');
     connLabel.textContent = 'Connected';
-    // If URL has #CODE, try to auto-join
+
+    // If we have a stored session from before the socket dropped, try to rejoin.
+    // The server keeps the slot for ~30s of grace period.
+    const stored = readSessionToken();
+    if (stored && stored.code && stored.playerId && stored.secret) {
+      send({ type: 'rejoin', code: stored.code, playerId: stored.playerId, secret: stored.secret });
+      // Don't auto-join from #code if we're trying to rejoin first.
+      return;
+    }
+    // No session — fall through to auto-join from URL hash if any.
     const hash = location.hash.replace('#', '').toUpperCase();
     if (hash && /^[A-Z0-9]{4}$/.test(hash)) {
       autoJoinCode = hash;
@@ -1221,6 +1230,33 @@ function send(msg) {
   localState.ws.send(JSON.stringify(msg));
 }
 
+// Reconnect token storage. Persisted in localStorage so a tab refresh or a
+// brief network drop can resume the same player slot within the server's
+// 30 s grace window.
+const HB_SESSION_KEY = 'hexball-session';
+function readSessionToken() {
+  try {
+    const raw = localStorage.getItem(HB_SESSION_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!obj || !obj.code || !obj.playerId || !obj.secret) return null;
+    // Expire client-side after 5 minutes — well beyond the server's 30s grace
+    // but stops a stale token from being tried next week.
+    if (obj.savedAt && Date.now() - obj.savedAt > 5 * 60 * 1000) return null;
+    return obj;
+  } catch (e) { return null; }
+}
+function writeSessionToken(code, playerId, secret) {
+  try {
+    localStorage.setItem(HB_SESSION_KEY, JSON.stringify({
+      code, playerId, secret, savedAt: Date.now(),
+    }));
+  } catch(e){}
+}
+function clearSessionToken() {
+  try { localStorage.removeItem(HB_SESSION_KEY); } catch(e){}
+}
+
 function handleMessage(msg) {
   switch (msg.type) {
     case 'welcome':
@@ -1232,6 +1268,44 @@ function handleMessage(msg) {
       location.hash = msg.code;
       showScreen('lobbyScreen');
       document.getElementById('lobbyCode').textContent = msg.code;
+      // Persist session so a brief disconnect can rejoin without losing our slot.
+      if (msg.secret && localState.playerId) {
+        writeSessionToken(msg.code, localState.playerId, msg.secret);
+      }
+      break;
+    case 'rejoinSuccess':
+      localState.playerId = msg.playerId;
+      localState.roomCode = msg.code;
+      localState.isHost = !!msg.isHost;
+      localState.game.mode = msg.mode;
+      // Refresh stored session in case secret changed (it doesn't currently, but defensive)
+      if (msg.secret) writeSessionToken(msg.code, msg.playerId, msg.secret);
+      location.hash = msg.code;
+      if (msg.state === 'playing') {
+        // Skip the resetting work onGameStart() does — we're resuming, not starting.
+        showScreen('gameScreen');
+        document.getElementById('endgame').classList.remove('show');
+        document.getElementById('matchHud').style.display = msg.mode === 'match' ? 'flex' : 'none';
+        document.getElementById('golfHud').style.display = msg.mode === 'golf' ? 'flex' : 'none';
+        document.getElementById('keyLegend').style.display = localState.pcMode ? 'block' : 'none';
+        setTimeout(refitForCurrentMode, 50);
+      } else {
+        showScreen('lobbyScreen');
+        document.getElementById('lobbyCode').textContent = msg.code;
+      }
+      addToast('🔁 Reconnected');
+      break;
+    case 'rejoinFailed':
+      // Couldn't rejoin (room gone, grace expired, etc). Drop the stale token
+      // and let the user start fresh.
+      clearSessionToken();
+      // If they were trying to auto-join from URL hash, fall through to that.
+      const hash = location.hash.replace('#', '').toUpperCase();
+      if (hash && /^[A-Z0-9]{4}$/.test(hash) && localState.myName) {
+        send({ type: 'joinRoom', code: hash, name: localState.myName });
+      } else {
+        showScreen('homeScreen');
+      }
       break;
     case 'lobby':
       updateLobby(msg);
@@ -1585,6 +1659,8 @@ function leaveRoomToHome() {
   location.hash = '';
   localState.roomCode = null;
   localState.isHost = false;
+  // Explicit exit: drop the rejoin token so we don't ghost back into the room.
+  clearSessionToken();
   document.getElementById('endgame').classList.remove('show');
   showScreen('homeScreen');
 }
