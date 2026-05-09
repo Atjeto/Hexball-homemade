@@ -1413,9 +1413,13 @@ let nextPlayerId = 1;
 // Rate-limit storage. Keyed by IP (createRoom) and playerId (chat). Periodically pruned.
 const createRoomLimits = new Map();   // ip -> lastAt
 const chatLimits = new Map();         // playerId -> [timestamps]
-const CREATE_ROOM_COOLDOWN_MS = 5000;
-const CHAT_WINDOW_MS = 10000;
-const CHAT_MAX_IN_WINDOW = 5;
+// Tests opt-out via env: setting these disables rate limits when running
+// integration tests (otherwise back-to-back room creations from loopback all
+// trigger the cooldown). Production uses the defaults below.
+const RATE_LIMITS_DISABLED = process.env.HEXBALL_DISABLE_RATE_LIMITS === '1';
+const CREATE_ROOM_COOLDOWN_MS = parseInt(process.env.HEXBALL_CREATE_COOLDOWN_MS || '5000', 10);
+const CHAT_WINDOW_MS = parseInt(process.env.HEXBALL_CHAT_WINDOW_MS || '10000', 10);
+const CHAT_MAX_IN_WINDOW = parseInt(process.env.HEXBALL_CHAT_MAX || '5', 10);
 function clientIp(req) {
   // x-forwarded-for is set by Render's proxy; first entry is the client.
   const fwd = req.headers && req.headers['x-forwarded-for'];
@@ -1454,14 +1458,16 @@ wss.on('connection', (ws, req) => {
     switch (msg.type) {
       case 'createRoom': {
         // Rate-limit: 1 createRoom per IP per cooldown window.
-        const now = Date.now();
-        const last = createRoomLimits.get(ip) || 0;
-        if (now - last < CREATE_ROOM_COOLDOWN_MS) {
-          const wait = Math.ceil((CREATE_ROOM_COOLDOWN_MS - (now - last)) / 1000);
-          ws.send(JSON.stringify({ type: 'error', message: 'slow down — try again in ' + wait + 's' }));
-          break;
+        if (!RATE_LIMITS_DISABLED) {
+          const now = Date.now();
+          const last = createRoomLimits.get(ip) || 0;
+          if (now - last < CREATE_ROOM_COOLDOWN_MS) {
+            const wait = Math.ceil((CREATE_ROOM_COOLDOWN_MS - (now - last)) / 1000);
+            ws.send(JSON.stringify({ type: 'error', message: 'slow down — try again in ' + wait + 's' }));
+            break;
+          }
+          createRoomLimits.set(ip, now);
         }
-        createRoomLimits.set(ip, now);
 
         if (currentRoom) leaveRoom();
         const room = createRoom(playerId, msg.mode || 'match', msg.opts || {});
@@ -1642,16 +1648,18 @@ wss.on('connection', (ws, req) => {
         const p = currentRoom.players.get(playerId);
         if (!p) break;
         // Rate-limit: at most CHAT_MAX_IN_WINDOW messages per CHAT_WINDOW_MS per player.
-        const now = Date.now();
-        const log = (chatLimits.get(playerId) || []).filter(t => now - t < CHAT_WINDOW_MS);
-        if (log.length >= CHAT_MAX_IN_WINDOW) {
-          // Silently drop, but tell only the spammer
-          try { ws.send(JSON.stringify({ type: 'error', message: 'chatting too fast' })); } catch(e){}
+        if (!RATE_LIMITS_DISABLED) {
+          const now = Date.now();
+          const log = (chatLimits.get(playerId) || []).filter(t => now - t < CHAT_WINDOW_MS);
+          if (log.length >= CHAT_MAX_IN_WINDOW) {
+            // Silently drop, but tell only the spammer
+            try { ws.send(JSON.stringify({ type: 'error', message: 'chatting too fast' })); } catch(e){}
+            chatLimits.set(playerId, log);
+            break;
+          }
+          log.push(now);
           chatLimits.set(playerId, log);
-          break;
         }
-        log.push(now);
-        chatLimits.set(playerId, log);
         currentRoom.broadcast({ type: 'chat', name: p.name, color: p.color, text });
         break;
       }

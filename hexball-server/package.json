@@ -4,7 +4,8 @@
   "description": "Hexball multiplayer server",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test tests/lobby.test.js tests/scoring.test.js tests/reconnect.test.js tests/ratelimits.test.js"
   },
   "dependencies": {
     "ws": "^8.18.0"
